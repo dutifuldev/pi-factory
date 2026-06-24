@@ -11,7 +11,7 @@ export async function initPiApp(appId: string, targetDir = appId): Promise<strin
   }
   const root = path.resolve(targetDir);
   const systemPromptPath = path.join(root, "prompts", "system.md");
-  const manifestPath = path.join(root, "pi-app.toml");
+  const manifestPath = path.join(root, "pi-factory.toml");
   await assertAbsent(systemPromptPath);
   await assertAbsent(manifestPath);
   await mkdir(path.join(root, "prompts"), { recursive: true });

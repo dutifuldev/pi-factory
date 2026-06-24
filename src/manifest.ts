@@ -67,12 +67,12 @@ export async function loadPiApp(input: LoadPiAppInput): Promise<{
   };
 }
 
-export function parsePiAppManifest(content: string, source = "pi-app.toml"): PiAppManifest {
+export function parsePiAppManifest(content: string, source = "pi-factory.toml"): PiAppManifest {
   const parsed = parse(content);
   return validatePiAppManifest(parsed, source);
 }
 
-export function validatePiAppManifest(value: unknown, source = "pi-app.toml"): PiAppManifest {
+export function validatePiAppManifest(value: unknown, source = "pi-factory.toml"): PiAppManifest {
   if (!isRecord(value)) {
     throw new Error(`${source}: manifest must be a TOML table`);
   }
@@ -304,15 +304,15 @@ function explicitManifestPath(input: LoadPiAppInput): string | undefined {
   }
   return input.appDir === undefined
     ? undefined
-    : path.join(expandPath(input.appDir), "pi-app.toml");
+    : path.join(expandPath(input.appDir), "pi-factory.toml");
 }
 
 async function appManifestPath(app: string, searchDirs: readonly string[]): Promise<string> {
   const candidates: string[] = [];
   for (const searchDir of searchDirs) {
-    candidates.push(path.join(expandPath(searchDir), app, "pi-app.toml"));
+    candidates.push(path.join(expandPath(searchDir), app, "pi-factory.toml"));
   }
-  candidates.push(path.join(process.cwd(), ".pi", "apps", app, "pi-app.toml"));
+  candidates.push(path.join(process.cwd(), ".pi", "apps", app, "pi-factory.toml"));
   const localExisting = await existingFiles(candidates);
   if (localExisting.length > 0) {
     return singleAppPath(app, localExisting);

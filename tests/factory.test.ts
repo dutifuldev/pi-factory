@@ -20,7 +20,7 @@ import {
 import { writePiRuntimeConfig } from "../src/runtime-config.js";
 
 describe("pi-factory", () => {
-  it("parses pi-app.toml manifests", () => {
+  it("parses pi-factory.toml manifests", () => {
     const manifest = parsePiAppManifest(sampleManifest("/tmp/pi-factory-state"));
     expect(manifest.id).toBe("demo-agent");
     expect(manifest.provider.id).toBe("local-openai");
@@ -305,10 +305,12 @@ platforms = ["linux"]
 
   it("does not overwrite existing app bundles on init", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "pi-factory-init-"));
-    await writeFile(path.join(root, "pi-app.toml"), "existing\n");
+    await writeFile(path.join(root, "pi-factory.toml"), "existing\n");
     try {
-      await expect(initPiApp("demo-agent", root)).rejects.toThrow("pi-app.toml");
-      await expect(readFile(path.join(root, "pi-app.toml"), "utf8")).resolves.toBe("existing\n");
+      await expect(initPiApp("demo-agent", root)).rejects.toThrow("pi-factory.toml");
+      await expect(readFile(path.join(root, "pi-factory.toml"), "utf8")).resolves.toBe(
+        "existing\n"
+      );
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -383,7 +385,7 @@ platforms = ["linux"]
       await writeFile(path.join(stateDir, "apps.json"), "{bad json");
       await mkdir(path.join(root, ".pi", "apps", "demo-agent"), { recursive: true });
       await writeFile(
-        path.join(root, ".pi", "apps", "demo-agent", "pi-app.toml"),
+        path.join(root, ".pi", "apps", "demo-agent", "pi-factory.toml"),
         minimalManifest("demo-agent", path.join(root, "state"))
       );
       const loaded = await loadPiApp({ app: "demo-agent" });
@@ -433,7 +435,7 @@ platforms = ["linux"]
 
       const validateDir = await run(["validate", root]);
       expect(validateDir.stdout).toContain("valid demo-agent");
-      const validateFile = await run(["validate", path.join(root, "pi-app.toml")]);
+      const validateFile = await run(["validate", path.join(root, "pi-factory.toml")]);
       expect(validateFile.stdout).toContain("valid demo-agent");
 
       const uninstall = await run(["uninstall", "demo-agent"]);
@@ -584,7 +586,7 @@ platforms = ["linux"]
     );
     await chmod(fakePi, 0o755);
     await writeFile(
-      path.join(root, "pi-app.toml"),
+      path.join(root, "pi-factory.toml"),
       sampleManifest(path.join(root, "state")).replace("sh -c 'exit 0' --", fakePi)
     );
     try {
@@ -627,7 +629,7 @@ if [ "$1" = "clone" ]; then
   cat > "$app_root/prompts/system.md" <<'PROMPT'
 Remote system prompt
 PROMPT
-  cat > "$app_root/pi-app.toml" <<MANIFEST
+  cat > "$app_root/pi-factory.toml" <<MANIFEST
 id = "$app_id"
 name = "$app_name"
 version = "0.1.0"
@@ -671,7 +673,7 @@ async function createAppBundle(stateDir?: string): Promise<string> {
   await writeFile(path.join(root, "prompts", "extension.md"), "Extension prompt\n");
   await writeFile(path.join(root, "extensions", "demo.ts"), "export default {};\n");
   await writeFile(
-    path.join(root, "pi-app.toml"),
+    path.join(root, "pi-factory.toml"),
     sampleManifest(stateDir ?? path.join(root, "state"))
   );
   return root;

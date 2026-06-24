@@ -11,7 +11,7 @@ of Pi.
 The core idea:
 
 ```text
-Pi app directory -> pi-app.toml -> resolved bundle -> generated Pi config -> native Pi launch
+Pi app directory -> pi-factory.toml -> resolved bundle -> generated Pi config -> native Pi launch
 ```
 
 Pi Factory should make it easy to say "launch the `localpager` Pi app" and have
@@ -50,7 +50,7 @@ mechanisms Pi already supports.
 
 ### App Bundle
 
-An app bundle is a directory containing a `pi-app.toml` manifest and the files it
+An app bundle is a directory containing a `pi-factory.toml` manifest and the files it
 references.
 
 Examples:
@@ -64,7 +64,7 @@ Example directory:
 
 ```text
 localpager-app/
-  pi-app.toml
+  pi-factory.toml
   prompts/system.md
   prompts/reposhell.md
   extensions/reposhell.ts
@@ -120,7 +120,7 @@ The launch plan should be inspectable before execution.
 
 ## Manifest
 
-The manifest file is `pi-app.toml` at the app bundle root.
+The manifest file is `pi-factory.toml` at the app bundle root.
 
 Example:
 
@@ -187,7 +187,7 @@ pi-factory install owner/repo[/subdir...] [--ref REF] [--yes]
 ```
 
 `install` accepts a source locator, not an app alias. It clones the GitHub
-source, finds `pi-app.toml` at the selected root, previews the app in
+source, finds `pi-factory.toml` at the selected root, previews the app in
 interactive terminals, runs supported build commands, copies the checkout into
 Pi Factory-managed app storage, and registers the app from its manifest id.
 
@@ -216,7 +216,7 @@ unlink it.
 Pi Factory should search for app bundles in deterministic order:
 
 1. Explicit `--app-file <path>` or `--app-dir <path>`.
-2. Project-local `.pi/apps/<app-id>/pi-app.toml`.
+2. Project-local `.pi/apps/<app-id>/pi-factory.toml`.
 3. Linked apps from the local installed-app index.
 4. Managed installs from the local installed-app index.
 

@@ -1,6 +1,6 @@
 # Pi App Manifest v1
 
-Pi Factory app bundles are directories with a `pi-app.toml` file at the root.
+Pi Factory app bundles are directories with a `pi-factory.toml` file at the root.
 
 Required top-level fields:
 

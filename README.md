@@ -1,6 +1,6 @@
 # pi-factory
 
-Pi Factory turns a small `pi-app.toml` bundle into a native Pi launch.
+Pi Factory turns a small `pi-factory.toml` bundle into a native Pi launch.
 
 Use it when you want a named standalone Pi app with its own model/provider
 config, prompts, extensions, state directory, and session directory, while still
@@ -37,12 +37,12 @@ That creates:
 
 ```text
 my-app/
-  pi-app.toml
+  pi-factory.toml
   prompts/system.md
   extensions/
 ```
 
-Minimal `pi-app.toml`:
+Minimal `pi-factory.toml`:
 
 ```toml
 id = "my-app"
