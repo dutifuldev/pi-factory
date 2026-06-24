@@ -1,0 +1,39 @@
+name: Publish
+
+on:
+  release:
+    types:
+      - published
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  npm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          registry-url: "https://registry.npmjs.org"
+      - run: npm ci
+      - name: Verify release tag
+        if: github.event_name == 'release'
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          tag="${GITHUB_REF_NAME}"
+          if [ "$tag" != "v$version" ] && [ "$tag" != "$version" ]; then
+            echo "Release tag $tag does not match package version $version." >&2
+            exit 1
+          fi
+      - run: npm run check
+      - run: npm run mutate
+      - uses: dutifuldev/slophammer@main
+        with:
+          checker: ts
+          version: 0.4.0
+      - run: npm publish --access public --provenance
