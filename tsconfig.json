@@ -14,6 +14,7 @@
     "noPropertyAccessFromIndexSignature": true,
     "useUnknownInCatchVariables": true,
     "noEmitOnError": true,
+    "declaration": true,
     "skipLibCheck": true,
     "outDir": "dist",
     "rootDir": "."
