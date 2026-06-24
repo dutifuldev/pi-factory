@@ -20,6 +20,10 @@ export type LoadPiAppInput = {
   readonly searchDirs?: readonly string[];
 };
 
+export function isValidPiAppId(value: string): boolean {
+  return /^[A-Za-z0-9._:-]+$/u.test(value);
+}
+
 type TopLevelManifestFields = Pick<
   PiAppManifest,
   | "id"
@@ -102,7 +106,7 @@ function readTopLevelFields(
     errors.push("schema_version must be 1");
   }
   const id = stringField(value, "id", errors);
-  if (id !== undefined && !/^[A-Za-z0-9._:-]+$/u.test(id)) {
+  if (id !== undefined && !isValidPiAppId(id)) {
     errors.push("id may only contain ASCII letters, digits, dot, colon, underscore, and hyphen");
   }
   const thinking = optionalString(value, "thinking", errors);
@@ -309,11 +313,19 @@ async function appManifestPath(app: string, searchDirs: readonly string[]): Prom
     candidates.push(path.join(expandPath(searchDir), app, "pi-app.toml"));
   }
   candidates.push(path.join(process.cwd(), ".pi", "apps", app, "pi-app.toml"));
+  const localExisting = await existingFiles(candidates);
+  if (localExisting.length > 0) {
+    return singleAppPath(app, localExisting);
+  }
   const installed = await findInstalledApp(app);
   if (installed !== undefined) {
     candidates.push(installed.manifestPath);
   }
   const existing = await existingFiles(candidates);
+  return singleAppPath(app, existing);
+}
+
+function singleAppPath(app: string, existing: readonly string[]): string {
   if (existing.length === 0) {
     throw new Error(`Pi app not found: ${app}`);
   }
@@ -482,6 +494,13 @@ function extensionsField(
   return entry.flatMap((item, index) => {
     if (!isRecord(item) || typeof item["path"] !== "string") {
       errors.push(`extensions[${String(index)}].path is required`);
+      return [];
+    }
+    if (
+      item["append_system_prompt"] !== undefined &&
+      typeof item["append_system_prompt"] !== "string"
+    ) {
+      errors.push(`extensions[${String(index)}].append_system_prompt must be a string`);
       return [];
     }
     return [

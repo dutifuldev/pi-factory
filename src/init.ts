@@ -1,7 +1,14 @@
 import { access, mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 
+import { isValidPiAppId } from "./manifest.js";
+
 export async function initPiApp(appId: string, targetDir = appId): Promise<string> {
+  if (!isValidPiAppId(appId)) {
+    throw new Error(
+      "app id may only contain ASCII letters, digits, dot, colon, underscore, and hyphen"
+    );
+  }
   const root = path.resolve(targetDir);
   const systemPromptPath = path.join(root, "prompts", "system.md");
   const manifestPath = path.join(root, "pi-app.toml");
@@ -12,11 +19,11 @@ export async function initPiApp(appId: string, targetDir = appId): Promise<strin
   await writeFile(systemPromptPath, `You are ${appId}, a Pi app.\n`, { flag: "wx" });
   await writeFile(
     manifestPath,
-    `id = "${appId}"\n` +
-      `name = "${appId}"\n` +
+    `id = ${tomlString(appId)}\n` +
+      `name = ${tomlString(appId)}\n` +
       `version = "0.1.0"\n` +
       `schema_version = 1\n` +
-      `state_dir = "~/.local/state/${appId}"\n` +
+      `state_dir = ${tomlString(`~/.local/state/${appId}`)}\n` +
       `pi_command = "npx -y @earendil-works/pi-coding-agent@latest"\n` +
       `thinking = "medium"\n` +
       `tools = ["read", "bash"]\n` +
@@ -31,6 +38,10 @@ export async function initPiApp(appId: string, targetDir = appId): Promise<strin
     { flag: "wx" }
   );
   return root;
+}
+
+function tomlString(value: string): string {
+  return JSON.stringify(value);
 }
 
 async function assertAbsent(file: string): Promise<void> {

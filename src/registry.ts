@@ -97,7 +97,25 @@ export function managedAppPath(appId: string): string {
 
 async function upsertApp(app: InstalledPiApp): Promise<void> {
   const apps = await loadAppIndex();
+  const existing = apps.find((entry) => entry.appId === app.appId);
+  await removeReplacedManagedApp(existing, app);
   await saveAppIndex([...apps.filter((entry) => entry.appId !== app.appId), app]);
+}
+
+async function removeReplacedManagedApp(
+  existing: InstalledPiApp | undefined,
+  replacement: InstalledPiApp
+): Promise<void> {
+  if (existing?.source.kind !== "github" || existing.source.managedPath === undefined) {
+    return;
+  }
+  if (
+    replacement.source.kind === "github" &&
+    replacement.source.managedPath === existing.source.managedPath
+  ) {
+    return;
+  }
+  await rm(existing.source.managedPath, { recursive: true, force: true });
 }
 
 async function refreshIndexedApp(app: InstalledPiApp): Promise<InstalledPiApp> {

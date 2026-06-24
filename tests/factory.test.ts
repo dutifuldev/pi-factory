@@ -267,6 +267,13 @@ append_system_prompt = "missing-path.md"
 `)
     ).toThrow("extensions[1].path is required");
     expect(() =>
+      parsePiAppManifest(`${sampleManifest("/tmp/pi-factory-state")}
+[[extensions]]
+path = "extensions/typed.ts"
+append_system_prompt = 123
+`)
+    ).toThrow("extensions[1].append_system_prompt must be a string");
+    expect(() =>
       parsePiAppManifest(
         sampleManifest("/tmp/pi-factory-state").replace(
           "\n[provider]",
@@ -302,6 +309,17 @@ platforms = ["linux"]
     try {
       await expect(initPiApp("demo-agent", root)).rejects.toThrow("pi-app.toml");
       await expect(readFile(path.join(root, "pi-app.toml"), "utf8")).resolves.toBe("existing\n");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects invalid app ids on init", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "pi-factory-init-"));
+    try {
+      await expect(initPiApp("bad id", path.join(root, "bad id"))).rejects.toThrow(
+        "app id may only contain"
+      );
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -351,6 +369,30 @@ platforms = ["linux"]
       expect(apps[0]?.warnings?.[0]).toContain("manifest unavailable");
     } finally {
       restoreEnv("PI_FACTORY_STATE_DIR", previous);
+      await rm(stateDir, { recursive: true, force: true });
+    }
+  });
+
+  it("loads project-local apps even when the installed index is malformed", async () => {
+    const stateDir = await mkdtemp(path.join(os.tmpdir(), "pi-factory-state-"));
+    const root = await mkdtemp(path.join(os.tmpdir(), "pi-factory-project-"));
+    const previousState = process.env["PI_FACTORY_STATE_DIR"];
+    const previousCwd = process.cwd();
+    process.env["PI_FACTORY_STATE_DIR"] = stateDir;
+    try {
+      await writeFile(path.join(stateDir, "apps.json"), "{bad json");
+      await mkdir(path.join(root, ".pi", "apps", "demo-agent"), { recursive: true });
+      await writeFile(
+        path.join(root, ".pi", "apps", "demo-agent", "pi-app.toml"),
+        minimalManifest("demo-agent", path.join(root, "state"))
+      );
+      process.chdir(root);
+      const loaded = await loadPiApp({ app: "demo-agent" });
+      expect(loaded.manifest.id).toBe("demo-agent");
+    } finally {
+      process.chdir(previousCwd);
+      restoreEnv("PI_FACTORY_STATE_DIR", previousState);
+      await rm(root, { recursive: true, force: true });
       await rm(stateDir, { recursive: true, force: true });
     }
   });
@@ -453,6 +495,7 @@ platforms = ["linux"]
     try {
       await writeFakeGit(binDir);
       const installed = await installPiApp({ source: "owner/rootrepo", yes: true });
+      const oldRoot = installed.appRoot;
       expect(installed.appId).toBe("root-agent");
       expect(installed.source).toMatchObject({
         kind: "github",
@@ -461,8 +504,15 @@ platforms = ["linux"]
       });
       expect(installed.source).not.toHaveProperty("subdir");
       expect(installed.source).not.toHaveProperty("requestedRef");
+      const updated = await installPiApp({
+        source: "owner/rootrepo",
+        requestedRef: "next",
+        yes: true
+      });
+      expect(updated.appRoot).not.toBe(oldRoot);
+      await expect(stat(oldRoot)).rejects.toThrow();
       await expect(uninstallPiApp("root-agent")).resolves.toBe(true);
-      await expect(stat(installed.appRoot)).rejects.toThrow();
+      await expect(stat(updated.appRoot)).rejects.toThrow();
     } finally {
       restoreEnv("PATH", previousPath);
       restoreEnv("PI_FACTORY_STATE_DIR", previousState);
@@ -557,10 +607,12 @@ async function writeFakeGit(binDir: string): Promise<void> {
 set -eu
 if [ "$1" = "clone" ]; then
   root_repo=0
+  commit=abc123def4567890
   for arg in "$@"; do
     target="$arg"
     case "$arg" in
       *rootrepo*) root_repo=1 ;;
+      next) commit=def456abc1237890 ;;
     esac
   done
   if [ "$root_repo" = "1" ]; then
@@ -599,10 +651,11 @@ reasoning = false
 command = ["sh", "-c", "printf built > build.txt"]
 platforms = ["linux"]
 MANIFEST
+  printf '%s\n' "$commit" > "$target/.fake-commit"
   exit 0
 fi
 if [ "$1" = "-C" ] && [ "$3" = "rev-parse" ]; then
-  printf '%s\\n' abc123def4567890
+  cat "$2/.fake-commit"
   exit 0
 fi
 exit 2
@@ -650,6 +703,24 @@ reasoning = false
 [[extensions]]
 path = "extensions/demo.ts"
 append_system_prompt = "prompts/extension.md"
+`;
+}
+
+function minimalManifest(appId: string, stateDir: string): string {
+  return `id = "${appId}"
+name = "${appId}"
+version = "0.1.0"
+schema_version = 1
+state_dir = "${stateDir}"
+
+[provider]
+id = "local-openai"
+base_url = "http://127.0.0.1:1234/v1"
+api = "openai-completions"
+
+[model]
+id = "auto"
+reasoning = false
 `;
 }
 
