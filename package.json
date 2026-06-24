@@ -18,8 +18,12 @@
   "bin": {
     "pi-factory": "dist/src/cli/main.js"
   },
+  "types": "dist/src/index.d.ts",
   "exports": {
-    ".": "./dist/src/index.js"
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "default": "./dist/src/index.js"
+    }
   },
   "files": [
     "dist/src/**",
@@ -31,7 +35,8 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "check": "npm run typecheck && npm test && npm run build"
+    "check": "npm run typecheck && npm test && npm run build",
+    "prepare": "npm run build"
   },
   "dependencies": {
     "smol-toml": "^1.4.2"
