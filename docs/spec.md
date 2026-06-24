@@ -285,6 +285,61 @@ pi-factory init localpager
 `run` should start Pi with the native TUI unless the resolved app explicitly uses
 Pi print mode.
 
+## Implementation Plan
+
+Build Pi Factory as one coherent end-to-end implementation, not as staged MVP
+phases. The first complete implementation should include the core library, CLI,
+manifest schema, examples, and tests together so the conventions are proven as a
+working standalone Pi app system.
+
+The implementation should deliver:
+
+- A TypeScript package named `pi-factory`.
+- A CLI binary named `pi-factory`.
+- A versioned manifest type for `schemaVersion: 1`.
+- JSON manifest loading from explicit files, project-local app directories,
+  user-local app directories, and configured search directories.
+- Deterministic profile discovery with clear structured errors for missing or
+  ambiguous app names.
+- Manifest validation with actionable field-level error messages.
+- Path expansion for `~`, environment variables, and paths relative to the
+  manifest file.
+- Extension pack resolution to native Pi `--extension`, `--system-prompt`, and
+  `--append-system-prompt` arguments.
+- Generated Pi runtime config for `models.json` and `settings.json`.
+- Inspectable launch plans that include command, args, env, cwd, generated
+  files, selected app profile, and warnings.
+- Native Pi process launching with inherited stdio, signal forwarding, and no
+  custom TUI.
+- CLI commands for `run`, `plan`, `validate`, `init`, and `inspect`.
+- Example app profiles for `localpi`, `localpager-agent`, and a minimal demo
+  app.
+- A documented manifest schema in `docs/manifest-v1.md`.
+- A generated JSON Schema file for editor/tool integration.
+- Unit tests for manifest loading, validation, path resolution, config
+  generation, extension argument ordering, and launch-plan generation.
+- Integration tests using fake Pi commands and temporary directories.
+
+The implementation is complete only when a user can run:
+
+```bash
+pi-factory init demo-agent
+pi-factory validate demo-agent/pi-app.json
+pi-factory plan --app-file demo-agent/pi-app.json
+pi-factory run --app-file demo-agent/pi-app.json
+```
+
+and `run` launches the real Pi CLI with Pi's native TUI and the app's resolved
+configuration.
+
+The implementation should keep the boundary strict:
+
+- Pi Factory owns app bundle resolution and launch preparation.
+- Pi owns the runtime, TUI, command system, model selector, session behavior, and
+  extension SDK.
+- App packages own their domain-specific extensions, prompts, schemas, tools,
+  and model/runtime discovery.
+
 ## Relationship To Existing Projects
 
 ### localpi
