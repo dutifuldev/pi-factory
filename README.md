@@ -1,6 +1,7 @@
 # pi-factory
 
-Pi Factory turns a small `pi-factory.toml` bundle into a native Pi launch.
+Pi Factory lets you develop and deploy isolated bundles of
+[Pi](https://pi.dev) for specific purposes.
 
 Use it when you want a named standalone Pi app with its own model/provider
 config, prompts, extensions, state directory, and session directory, while still
