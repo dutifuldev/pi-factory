@@ -8,9 +8,20 @@ import { loadPiApp } from "./manifest.js";
 export async function loadAppIndex(): Promise<readonly InstalledPiApp[]> {
   const indexPath = appIndexPath();
   try {
-    return JSON.parse(await readFile(indexPath, "utf8")) as readonly InstalledPiApp[];
-  } catch {
-    return [];
+    const parsed = JSON.parse(await readFile(indexPath, "utf8")) as unknown;
+    if (!Array.isArray(parsed)) {
+      throw new Error("app index must be a JSON array");
+    }
+    return parsed as readonly InstalledPiApp[];
+  } catch (error) {
+    if (isNodeError(error) && error.code === "ENOENT") {
+      return [];
+    }
+    throw new Error(
+      `failed to load Pi Factory app index ${indexPath}: ${
+        error instanceof Error ? error.message : String(error)
+      }`
+    );
   }
 }
 
@@ -80,7 +91,7 @@ export async function uninstallPiApp(appId: string): Promise<boolean> {
   return true;
 }
 
-export async function managedAppPath(appId: string): Promise<string> {
+export function managedAppPath(appId: string): string {
   return path.join(managedAppsDir(), `${safePathComponent(appId)}-${shortHash(appId)}`);
 }
 
@@ -113,4 +124,8 @@ function shortHash(value: string): string {
     hash = Math.imul(hash, 0x01000193);
   }
   return (hash >>> 0).toString(16).padStart(8, "0");
+}
+
+function isNodeError(error: unknown): error is NodeJS.ErrnoException {
+  return error instanceof Error && "code" in error;
 }

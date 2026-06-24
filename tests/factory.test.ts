@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile, mkdir, chmod } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -6,9 +6,17 @@ import { describe, expect, it } from "vitest";
 
 import { run } from "../src/cli/cli.js";
 import { initPiApp } from "../src/init.js";
-import { createPiLaunchPlan, shellCommand } from "../src/launch.js";
+import { installPiApp, parseGithubSource } from "../src/install.js";
+import { createPiLaunchPlan, execPiLaunchPlan, shellCommand } from "../src/launch.js";
 import { loadPiApp, manifestToDefinition, parsePiAppManifest } from "../src/manifest.js";
-import { linkPiApp } from "../src/registry.js";
+import { expandPath, safePathComponent } from "../src/paths.js";
+import {
+  linkPiApp,
+  listPiApps,
+  loadAppIndex,
+  managedAppPath,
+  uninstallPiApp
+} from "../src/registry.js";
 import { writePiRuntimeConfig } from "../src/runtime-config.js";
 
 describe("pi-factory", () => {
@@ -38,6 +46,56 @@ describe("pi-factory", () => {
     }
   });
 
+  it("keeps generated Pi config env ahead of app env overrides", async () => {
+    const plan = await createPiLaunchPlan({
+      id: "demo-agent",
+      name: "Demo Agent",
+      stateDir: "/tmp/pi-factory-state",
+      sessionDir: "/tmp/pi-factory-sessions",
+      piCommand: "sh",
+      providers: [
+        { id: "local-openai", baseUrl: "http://127.0.0.1:1234/v1", models: [{ id: "auto" }] }
+      ],
+      defaultProvider: "local-openai",
+      defaultModel: "auto",
+      thinking: "medium",
+      env: {
+        PI_CODING_AGENT_DIR: "/tmp/wrong-config",
+        PI_CODING_AGENT_SESSION_DIR: "/tmp/wrong-sessions",
+        CUSTOM_ENV: "1"
+      }
+    });
+    expect(plan.env["PI_CODING_AGENT_DIR"]).toContain("pi-config-runtime");
+    expect(plan.env["PI_CODING_AGENT_SESSION_DIR"]).toBe("/tmp/pi-factory-sessions");
+    expect(plan.env["CUSTOM_ENV"]).toBe("1");
+    expect(plan.warnings).toContain("ignored managed env PI_CODING_AGENT_DIR");
+  });
+
+  it("keeps launch args minimal when optional fields are absent", async () => {
+    const plan = await createPiLaunchPlan({
+      id: "minimal-agent",
+      name: "Minimal Agent",
+      stateDir: "/tmp/pi-factory-state",
+      sessionDir: "/tmp/pi-factory-sessions",
+      piCommand: "sh -c 'exit 0' --",
+      providers: [
+        { id: "local-openai", baseUrl: "http://127.0.0.1:1234/v1", models: [{ id: "auto" }] }
+      ],
+      defaultProvider: "local-openai",
+      defaultModel: "auto",
+      thinking: "medium",
+      forwardedArgs: ["--tools", "read"]
+    });
+    expect(plan.args).not.toContain("--system-prompt");
+    expect(plan.args.filter((arg) => arg === "--tools")).toHaveLength(1);
+    await expect(execPiLaunchPlan({ ...plan, command: "" })).rejects.toThrow(
+      "launch command must not be empty"
+    );
+    await expect(execPiLaunchPlan({ ...plan, command: "sh 'unterminated" })).rejects.toThrow(
+      "unterminated quote"
+    );
+  });
+
   it("writes Pi models and settings config", async () => {
     const root = await createAppBundle();
     try {
@@ -64,6 +122,44 @@ describe("pi-factory", () => {
     }
   });
 
+  it("writes disabled compaction when the selected model has no context window", async () => {
+    const stateDir = await mkdtemp(path.join(os.tmpdir(), "pi-factory-runtime-"));
+    try {
+      const runtime = await writePiRuntimeConfig({
+        id: "minimal-agent",
+        name: "Minimal Agent",
+        stateDir,
+        sessionDir: path.join(stateDir, "sessions"),
+        piCommand: "sh -c 'exit 0' --",
+        providers: [
+          {
+            id: "local-openai",
+            baseUrl: "http://127.0.0.1:1234/v1",
+            apiKey: "test-key",
+            compat: { supportsDeveloperRole: true, supportsReasoningEffort: true },
+            models: [
+              {
+                id: "auto",
+                name: "Auto",
+                input: ["text", "image"],
+                cost: { input: 1, output: 2, cacheRead: 0, cacheWrite: 0 }
+              }
+            ]
+          }
+        ],
+        defaultProvider: "missing-provider",
+        defaultModel: "missing-model",
+        thinking: "off"
+      });
+      const settings = JSON.parse(await readFile(runtime.settingsPath, "utf8")) as {
+        compaction?: { enabled?: boolean };
+      };
+      expect(settings.compaction?.enabled).toBe(false);
+    } finally {
+      await rm(stateDir, { recursive: true, force: true });
+    }
+  });
+
   it("resolves relative state paths from the app bundle root", async () => {
     const root = await createAppBundle("relative-state");
     try {
@@ -78,10 +174,12 @@ describe("pi-factory", () => {
 
   it("rejects malformed optional manifest fields", () => {
     expect(() =>
-      parsePiAppManifest(sampleManifest("/tmp/pi-factory-state").replace(
-        'tools = ["read", "bash"]',
-        'tools = "bash"'
-      ))
+      parsePiAppManifest(
+        sampleManifest("/tmp/pi-factory-state").replace(
+          'tools = ["read", "bash"]',
+          'tools = "bash"'
+        )
+      )
     ).toThrow("tools must be an array of strings");
   });
 
@@ -101,7 +199,7 @@ state_dir = "/tmp/pi-factory-state"
       parsePiAppManifest(
         sampleManifest("/tmp/pi-factory-state")
           .replace('api = "openai-completions"', 'api = "typo"')
-          .replace('reasoning = false', 'reasoning = false\nthinking_format = "bogus"')
+          .replace("reasoning = false", 'reasoning = false\nthinking_format = "bogus"')
       )
     ).toThrow("provider.api must be openai-completions");
   });
@@ -109,9 +207,23 @@ state_dir = "/tmp/pi-factory-state"
   it("rejects malformed optional model fields", () => {
     expect(() =>
       parsePiAppManifest(
-        sampleManifest("/tmp/pi-factory-state").replace("context_window = 4096", 'context_window = "4096"')
+        sampleManifest("/tmp/pi-factory-state").replace(
+          "context_window = 4096",
+          'context_window = "4096"'
+        )
       )
     ).toThrow("context_window must be a number");
+  });
+
+  it("rejects malformed optional string fields", () => {
+    expect(() =>
+      parsePiAppManifest(
+        sampleManifest("/tmp/pi-factory-state").replace(
+          "pi_command = \"sh -c 'exit 0' --\"",
+          "pi_command = 123"
+        )
+      )
+    ).toThrow("pi_command must be a string");
   });
 
   it("preserves build platform filters", () => {
@@ -121,6 +233,16 @@ command = ["echo", "build"]
 platforms = ["linux"]
 `);
     expect(manifest.build?.[0]).toEqual({ command: ["echo", "build"], platforms: ["linux"] });
+  });
+
+  it("accepts optional manifest variants", () => {
+    const manifest = parsePiAppManifest(
+      sampleManifest("/tmp/pi-factory-state")
+        .replace('append_system_prompt = "prompts/extension.md"', "")
+        .replace("reasoning = false", 'reasoning = true\nthinking_format = "qwen-chat-template"')
+    );
+    expect(manifest.extensions?.[0]).toEqual({ path: "extensions/demo.ts" });
+    expect(manifest.model.thinking_format).toBe("qwen-chat-template");
   });
 
   it("rejects unknown build platform filters", () => {
@@ -133,12 +255,67 @@ platforms = ["darwin"]
     ).toThrow("build[0].platforms must contain only linux, macos, or windows");
   });
 
+  it("rejects malformed manifest collections", () => {
+    const base = sampleManifest("/tmp/pi-factory-state").split("\n[[extensions]]")[0] ?? "";
+    expect(() =>
+      parsePiAppManifest(base.replace("\n[provider]", '\nextensions = "bad"\n\n[provider]'))
+    ).toThrow("extensions must be an array of tables");
+    expect(() =>
+      parsePiAppManifest(`${sampleManifest("/tmp/pi-factory-state")}
+[[extensions]]
+append_system_prompt = "missing-path.md"
+`)
+    ).toThrow("extensions[1].path is required");
+    expect(() =>
+      parsePiAppManifest(
+        sampleManifest("/tmp/pi-factory-state").replace(
+          "\n[provider]",
+          '\nbuild = "bad"\n\n[provider]'
+        )
+      )
+    ).toThrow("build must be an array of tables");
+    expect(() =>
+      parsePiAppManifest(`${sampleManifest("/tmp/pi-factory-state")}
+[[build]]
+command = ["echo", 1]
+`)
+    ).toThrow("build[0].command must be an array of strings");
+    expect(() =>
+      parsePiAppManifest(`${sampleManifest("/tmp/pi-factory-state")}
+[[build]]
+platforms = ["linux"]
+`)
+    ).toThrow("build[0].command is required");
+    expect(() =>
+      parsePiAppManifest(
+        sampleManifest("/tmp/pi-factory-state").replace(
+          "\n[provider]",
+          "\n[env]\nNUMBER = 1\n\n[provider]"
+        )
+      )
+    ).toThrow("env must be a table of string values");
+  });
+
   it("does not overwrite existing app bundles on init", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "pi-factory-init-"));
     await writeFile(path.join(root, "pi-app.toml"), "existing\n");
     try {
       await expect(initPiApp("demo-agent", root)).rejects.toThrow("pi-app.toml");
       await expect(readFile(path.join(root, "pi-app.toml"), "utf8")).resolves.toBe("existing\n");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("creates a usable app bundle on init", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "pi-factory-init-"));
+    const appDir = path.join(root, "sample-agent");
+    try {
+      const created = await initPiApp("sample-agent", appDir);
+      expect(created).toBe(appDir);
+      const loaded = await loadPiApp({ appDir });
+      expect(loaded.manifest.id).toBe("sample-agent");
+      expect((await stat(path.join(appDir, "extensions"))).isDirectory()).toBe(true);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -162,6 +339,22 @@ platforms = ["darwin"]
     }
   });
 
+  it("keeps stale linked apps visible with warnings", async () => {
+    const stateDir = await mkdtemp(path.join(os.tmpdir(), "pi-factory-state-"));
+    const root = await createAppBundle();
+    const previous = process.env["PI_FACTORY_STATE_DIR"];
+    process.env["PI_FACTORY_STATE_DIR"] = stateDir;
+    try {
+      await linkPiApp(root);
+      await rm(root, { recursive: true, force: true });
+      const apps = await listPiApps();
+      expect(apps[0]?.warnings?.[0]).toContain("manifest unavailable");
+    } finally {
+      restoreEnv("PI_FACTORY_STATE_DIR", previous);
+      await rm(stateDir, { recursive: true, force: true });
+    }
+  });
+
   it("validates linked app ids through the installed app index", async () => {
     const stateDir = await mkdtemp(path.join(os.tmpdir(), "pi-factory-state-"));
     const root = await createAppBundle();
@@ -179,13 +372,166 @@ platforms = ["darwin"]
     }
   });
 
+  it("supports plan, inspect, help, and uninstall CLI commands", async () => {
+    const stateDir = await mkdtemp(path.join(os.tmpdir(), "pi-factory-state-"));
+    const root = await createAppBundle();
+    const previous = process.env["PI_FACTORY_STATE_DIR"];
+    process.env["PI_FACTORY_STATE_DIR"] = stateDir;
+    try {
+      await linkPiApp(root);
+      const help = await run(["--help"]);
+      expect(help.stdout).toContain("pi-factory - run declarative Pi app bundles");
+
+      const plan = await run(["plan", "demo-agent"]);
+      expect(plan.code).toBe(0);
+      expect(plan.stdout).toContain('"note": "plan does not write runtime config or launch Pi"');
+
+      const inspect = await run(["inspect", "--app-dir", root]);
+      expect(inspect.code).toBe(0);
+      expect(inspect.stdout).toContain('"id": "demo-agent"');
+
+      const validateDir = await run(["validate", root]);
+      expect(validateDir.stdout).toContain("valid demo-agent");
+      const validateFile = await run(["validate", path.join(root, "pi-app.toml")]);
+      expect(validateFile.stdout).toContain("valid demo-agent");
+
+      const uninstall = await run(["uninstall", "demo-agent"]);
+      expect(uninstall.stdout).toBe("uninstalled\n");
+      const secondUninstall = await run(["uninstall", "demo-agent"]);
+      expect(secondUninstall.stdout).toBe("not installed\n");
+      const unknown = await run(["unknown"]);
+      expect(unknown.code).toBe(2);
+      const missingAppDir = await run(["plan", "--app-dir"]);
+      expect(missingAppDir.stderr).toContain("--app-dir requires a value");
+    } finally {
+      restoreEnv("PI_FACTORY_STATE_DIR", previous);
+      await rm(root, { recursive: true, force: true });
+      await rm(stateDir, { recursive: true, force: true });
+    }
+  });
+
+  it("installs GitHub shorthand apps through a fake git command", async () => {
+    const stateDir = await mkdtemp(path.join(os.tmpdir(), "pi-factory-state-"));
+    const binDir = await mkdtemp(path.join(os.tmpdir(), "pi-factory-bin-"));
+    const previousState = process.env["PI_FACTORY_STATE_DIR"];
+    const previousPath = process.env["PATH"];
+    process.env["PI_FACTORY_STATE_DIR"] = stateDir;
+    process.env["PATH"] = `${binDir}${path.delimiter}${previousPath ?? ""}`;
+    try {
+      await writeFakeGit(binDir);
+      const installed = await installPiApp({
+        source: "owner/repo/apps/demo",
+        requestedRef: "main",
+        yes: true
+      });
+      expect(installed.appId).toBe("remote-agent");
+      expect(installed.source).toMatchObject({
+        kind: "github",
+        owner: "owner",
+        repo: "repo",
+        requestedRef: "main",
+        resolvedCommit: "abc123def4567890"
+      });
+      await expect(readFile(path.join(installed.appRoot, "build.txt"), "utf8")).resolves.toBe(
+        "built"
+      );
+    } finally {
+      restoreEnv("PATH", previousPath);
+      restoreEnv("PI_FACTORY_STATE_DIR", previousState);
+      await rm(binDir, { recursive: true, force: true });
+      await rm(stateDir, { recursive: true, force: true });
+    }
+  });
+
+  it("installs root app bundles without optional source fields", async () => {
+    const stateDir = await mkdtemp(path.join(os.tmpdir(), "pi-factory-state-"));
+    const binDir = await mkdtemp(path.join(os.tmpdir(), "pi-factory-bin-"));
+    const previousState = process.env["PI_FACTORY_STATE_DIR"];
+    const previousPath = process.env["PATH"];
+    process.env["PI_FACTORY_STATE_DIR"] = stateDir;
+    process.env["PATH"] = `${binDir}${path.delimiter}${previousPath ?? ""}`;
+    try {
+      await writeFakeGit(binDir);
+      const installed = await installPiApp({ source: "owner/rootrepo", yes: true });
+      expect(installed.appId).toBe("root-agent");
+      expect(installed.source).toMatchObject({
+        kind: "github",
+        owner: "owner",
+        repo: "rootrepo"
+      });
+      expect(installed.source).not.toHaveProperty("subdir");
+      expect(installed.source).not.toHaveProperty("requestedRef");
+      await expect(uninstallPiApp("root-agent")).resolves.toBe(true);
+      await expect(stat(installed.appRoot)).rejects.toThrow();
+    } finally {
+      restoreEnv("PATH", previousPath);
+      restoreEnv("PI_FACTORY_STATE_DIR", previousState);
+      await rm(binDir, { recursive: true, force: true });
+      await rm(stateDir, { recursive: true, force: true });
+    }
+  });
+
+  it("requires --yes for noninteractive remote installs", async () => {
+    const stateDir = await mkdtemp(path.join(os.tmpdir(), "pi-factory-state-"));
+    const binDir = await mkdtemp(path.join(os.tmpdir(), "pi-factory-bin-"));
+    const previousState = process.env["PI_FACTORY_STATE_DIR"];
+    const previousPath = process.env["PATH"];
+    process.env["PI_FACTORY_STATE_DIR"] = stateDir;
+    process.env["PATH"] = `${binDir}${path.delimiter}${previousPath ?? ""}`;
+    try {
+      await writeFakeGit(binDir);
+      await expect(installPiApp({ source: "owner/rootrepo" })).rejects.toThrow("requires --yes");
+    } finally {
+      restoreEnv("PATH", previousPath);
+      restoreEnv("PI_FACTORY_STATE_DIR", previousState);
+      await rm(binDir, { recursive: true, force: true });
+      await rm(stateDir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects unsupported install sources", () => {
+    expect(parseGithubSource("owner/repo")).toEqual({ owner: "owner", repo: "repo" });
+    expect(() => parseGithubSource("https://github.com/owner/repo")).toThrow("GitHub shorthand");
+    expect(() => parseGithubSource("owner")).toThrow("usage: pi-factory install");
+  });
+
+  it("expands path helpers predictably", () => {
+    const previous = process.env["PI_FACTORY_TEST_DIR"];
+    process.env["PI_FACTORY_TEST_DIR"] = "nested";
+    try {
+      expect(expandPath("~")).toBe(os.homedir());
+      expect(expandPath("$PI_FACTORY_TEST_DIR/file", "/tmp/root")).toBe(
+        path.join("/tmp/root", "nested", "file")
+      );
+      expect(expandPath("${PI_FACTORY_TEST_DIR}/file", "/tmp/root")).toBe(
+        path.join("/tmp/root", "nested", "file")
+      );
+      expect(safePathComponent(" ??? ")).toBe("app");
+      expect(managedAppPath("Demo Agent!")).toContain("Demo-Agent");
+    } finally {
+      restoreEnv("PI_FACTORY_TEST_DIR", previous);
+    }
+  });
+
+  it("surfaces malformed installed app indexes", async () => {
+    const stateDir = await mkdtemp(path.join(os.tmpdir(), "pi-factory-state-"));
+    const previous = process.env["PI_FACTORY_STATE_DIR"];
+    process.env["PI_FACTORY_STATE_DIR"] = stateDir;
+    try {
+      await writeFile(path.join(stateDir, "apps.json"), "{not json");
+      await expect(loadAppIndex()).rejects.toThrow("failed to load Pi Factory app index");
+    } finally {
+      restoreEnv("PI_FACTORY_STATE_DIR", previous);
+      await rm(stateDir, { recursive: true, force: true });
+    }
+  });
 
   it("runs a fake Pi command without touching real providers", async () => {
     const root = await createAppBundle();
     const fakePi = path.join(root, "fake-pi.sh");
     await writeFile(
       fakePi,
-      "#!/bin/sh\n[ -d \"$PI_CODING_AGENT_SESSION_DIR\" ] || exit 42\nprintf '%s\\n' \"$PI_CODING_AGENT_DIR\" > pi-dir.txt\n"
+      '#!/bin/sh\n[ -d "$PI_CODING_AGENT_SESSION_DIR" ] || exit 42\nprintf \'%s\\n\' "$PI_CODING_AGENT_DIR" > pi-dir.txt\n'
     );
     await chmod(fakePi, 0o755);
     await writeFile(
@@ -203,6 +549,68 @@ platforms = ["darwin"]
   });
 });
 
+async function writeFakeGit(binDir: string): Promise<void> {
+  const fakeGit = path.join(binDir, "git");
+  await writeFile(
+    fakeGit,
+    `#!/bin/sh
+set -eu
+if [ "$1" = "clone" ]; then
+  root_repo=0
+  for arg in "$@"; do
+    target="$arg"
+    case "$arg" in
+      *rootrepo*) root_repo=1 ;;
+    esac
+  done
+  if [ "$root_repo" = "1" ]; then
+    app_root="$target"
+    app_id="root-agent"
+    app_name="Root Agent"
+  else
+    app_root="$target/apps/demo"
+    app_id="remote-agent"
+    app_name="Remote Agent"
+  fi
+  mkdir -p "$app_root/prompts"
+  cat > "$app_root/prompts/system.md" <<'PROMPT'
+Remote system prompt
+PROMPT
+  cat > "$app_root/pi-app.toml" <<MANIFEST
+id = "$app_id"
+name = "$app_name"
+version = "0.1.0"
+schema_version = 1
+state_dir = "state"
+pi_command = "sh -c 'exit 0' --"
+thinking = "medium"
+system_prompt = "prompts/system.md"
+
+[provider]
+id = "local-openai"
+base_url = "http://127.0.0.1:1234/v1"
+api = "openai-completions"
+
+[model]
+id = "auto"
+reasoning = false
+
+[[build]]
+command = ["sh", "-c", "printf built > build.txt"]
+platforms = ["linux"]
+MANIFEST
+  exit 0
+fi
+if [ "$1" = "-C" ] && [ "$3" = "rev-parse" ]; then
+  printf '%s\\n' abc123def4567890
+  exit 0
+fi
+exit 2
+`
+  );
+  await chmod(fakeGit, 0o755);
+}
+
 async function createAppBundle(stateDir?: string): Promise<string> {
   const root = await mkdtemp(path.join(os.tmpdir(), "pi-factory-app-"));
   await mkdir(path.join(root, "prompts"), { recursive: true });
@@ -210,7 +618,10 @@ async function createAppBundle(stateDir?: string): Promise<string> {
   await writeFile(path.join(root, "prompts", "system.md"), "System prompt\n");
   await writeFile(path.join(root, "prompts", "extension.md"), "Extension prompt\n");
   await writeFile(path.join(root, "extensions", "demo.ts"), "export default {};\n");
-  await writeFile(path.join(root, "pi-app.toml"), sampleManifest(stateDir ?? path.join(root, "state")));
+  await writeFile(
+    path.join(root, "pi-app.toml"),
+    sampleManifest(stateDir ?? path.join(root, "state"))
+  );
   return root;
 }
 
@@ -244,7 +655,7 @@ append_system_prompt = "prompts/extension.md"
 
 function restoreEnv(key: string, value: string | undefined): void {
   if (value === undefined) {
-    delete process.env[key];
+    Reflect.deleteProperty(process.env, key);
   } else {
     process.env[key] = value;
   }

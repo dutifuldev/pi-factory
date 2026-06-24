@@ -13,6 +13,8 @@ export async function createPiLaunchPlan(
   app: PiAppDefinition,
   runtimeConfig: PiRuntimeConfigPaths = runtimeConfigPaths(app)
 ): Promise<PiLaunchPlan> {
+  const appEnv = withoutManagedPiEnv(app.env);
+  const warnings = managedPiEnvWarnings(app.env);
   return {
     appId: app.id,
     appName: app.name,
@@ -29,16 +31,16 @@ export async function createPiLaunchPlan(
       ...withDefaultTools(app.forwardedArgs ?? [], app.tools)
     ],
     env: {
+      ...appEnv,
       PI_CODING_AGENT_DIR: runtimeConfig.configDir,
       PI_CODING_AGENT_SESSION_DIR: app.sessionDir,
       PI_OFFLINE: process.env["PI_OFFLINE"] ?? "1",
       PI_TELEMETRY: process.env["PI_TELEMETRY"] ?? "0",
-      PI_SKIP_VERSION_CHECK: process.env["PI_SKIP_VERSION_CHECK"] ?? "1",
-      ...(app.env ?? {})
+      PI_SKIP_VERSION_CHECK: process.env["PI_SKIP_VERSION_CHECK"] ?? "1"
     },
     ...(app.rootDir === undefined ? {} : { cwd: app.rootDir }),
     runtimeConfig,
-    warnings: []
+    warnings
   };
 }
 
@@ -109,54 +111,104 @@ function hasToolFlag(args: readonly string[]): boolean {
   );
 }
 
+function withoutManagedPiEnv(
+  env: Readonly<Record<string, string>> | undefined
+): Readonly<Record<string, string>> {
+  if (env === undefined) {
+    return {};
+  }
+  return Object.fromEntries(
+    Object.entries(env).filter(
+      ([key]) => key !== "PI_CODING_AGENT_DIR" && key !== "PI_CODING_AGENT_SESSION_DIR"
+    )
+  );
+}
+
+function managedPiEnvWarnings(
+  env: Readonly<Record<string, string>> | undefined
+): readonly string[] {
+  if (env === undefined) {
+    return [];
+  }
+  const warnings: string[] = [];
+  if (env["PI_CODING_AGENT_DIR"] !== undefined) {
+    warnings.push("ignored managed env PI_CODING_AGENT_DIR");
+  }
+  if (env["PI_CODING_AGENT_SESSION_DIR"] !== undefined) {
+    warnings.push("ignored managed env PI_CODING_AGENT_SESSION_DIR");
+  }
+  return warnings;
+}
+
 function shellQuote(value: string): string {
   return `'${value.replaceAll("'", "'\\''")}'`;
 }
 
 function splitCommandLine(command: string): string[] {
   const parts: string[] = [];
-  let current = "";
-  let quote: "'" | "\"" | undefined;
-  let escaping = false;
+  let state: SplitState = { current: "", quote: undefined, escaping: false };
   for (const char of command) {
-    if (escaping) {
-      current += char;
-      escaping = false;
-      continue;
-    }
-    if (char === "\\") {
-      escaping = true;
-      continue;
-    }
-    if (quote !== undefined) {
-      if (char === quote) {
-        quote = undefined;
-      } else {
-        current += char;
-      }
-      continue;
-    }
-    if (char === "'" || char === "\"") {
-      quote = char;
-      continue;
-    }
-    if (/\s/u.test(char)) {
-      if (current !== "") {
-        parts.push(current);
-        current = "";
-      }
-      continue;
-    }
-    current += char;
+    state = consumeCommandChar(parts, state, char);
   }
-  if (escaping) {
-    current += "\\";
+  finishSplitCommand(parts, state, command);
+  return parts;
+}
+
+interface SplitState {
+  readonly current: string;
+  readonly quote: "'" | '"' | undefined;
+  readonly escaping: boolean;
+}
+
+function consumeCommandChar(parts: string[], state: SplitState, char: string): SplitState {
+  if (state.escaping) {
+    return { ...state, current: state.current + char, escaping: false };
   }
-  if (quote !== undefined) {
+  if (startsEscape(char)) {
+    return { ...state, escaping: true };
+  }
+  if (state.quote !== undefined) {
+    return consumeQuotedChar(state, char);
+  }
+  if (isQuote(char)) {
+    return { ...state, quote: char };
+  }
+  if (isWhitespace(char)) {
+    return { ...state, current: flushPart(parts, state.current) };
+  }
+  return { ...state, current: state.current + char };
+}
+
+function finishSplitCommand(parts: string[], state: SplitState, command: string): void {
+  const current = state.escaping ? `${state.current}\\` : state.current;
+  if (state.quote !== undefined) {
     throw new Error(`unterminated quote in launch command: ${command}`);
   }
+  flushPart(parts, current);
+}
+
+function startsEscape(char: string): boolean {
+  return char === "\\";
+}
+
+function isQuote(char: string): char is "'" | '"' {
+  return char === "'" || char === '"';
+}
+
+function isWhitespace(char: string): boolean {
+  return /\s/u.test(char);
+}
+
+function consumeQuotedChar(state: SplitState, char: string): SplitState {
+  if (char === state.quote) {
+    return { ...state, quote: undefined };
+  }
+  return { ...state, current: state.current + char };
+}
+
+function flushPart(parts: string[], current: string): string {
   if (current !== "") {
     parts.push(current);
   }
-  return parts;
+  return "";
 }

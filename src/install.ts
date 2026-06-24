@@ -20,50 +20,95 @@ type GithubSource = {
   readonly subdir?: string;
 };
 
+type PreparedInstall = {
+  readonly source: GithubSource;
+  readonly checkout: string;
+  readonly appRoot: string;
+  readonly resolvedCommit: string;
+  readonly loaded: Awaited<ReturnType<typeof loadPiApp>>;
+};
+
 export async function installPiApp(input: InstallInput): Promise<InstalledPiApp> {
   const source = parseGithubSource(input.source);
   await mkdir(managedAppsDir(), { recursive: true });
   const tempRoot = await mkdtemp(path.join(managedAppsDir(), ".install-"));
-  const checkout = path.join(tempRoot, "checkout");
   try {
-    await git(["clone", "--depth", "1", ...refArgs(input.requestedRef), githubUrl(source), checkout]);
-    const resolvedCommit = await gitOutput(["-C", checkout, "rev-parse", "HEAD"]);
-    const appRoot = source.subdir === undefined ? checkout : path.join(checkout, source.subdir);
-    const loaded = await loadPiApp({ appDir: appRoot });
-    if (!input.yes && !process.stdin.isTTY) {
-      throw new Error("remote app install requires --yes when stdin is not interactive");
-    }
-    if (!input.yes && process.stdin.isTTY) {
-      process.stderr.write(`Pi app install preview:\n`);
-      process.stderr.write(`  id: ${loaded.manifest.id}\n`);
-      process.stderr.write(`  name: ${loaded.manifest.name}\n`);
-      process.stderr.write(`  source: ${input.source}\n`);
-      if (!(await confirm("Install this Pi app?"))) {
-        throw new Error("Pi app install cancelled");
-      }
-    }
-    await runBuildCommands(loaded.manifest.build ?? [], appRoot);
-    const finalRoot = path.join(
-      managedAppsDir(),
-      `${safePathComponent(loaded.manifest.id)}-${safePathComponent(resolvedCommit.slice(0, 12))}`
-    );
-    await rm(finalRoot, { recursive: true, force: true });
-    await mkdir(path.dirname(finalRoot), { recursive: true });
-    await rename(checkout, finalRoot);
-    const finalAppRoot = source.subdir === undefined ? finalRoot : path.join(finalRoot, source.subdir);
-    const sourceInfo: PiAppSourceInfo = {
-      kind: "github",
-      owner: source.owner,
-      repo: source.repo,
-      ...(source.subdir === undefined ? {} : { subdir: source.subdir }),
-      ...(input.requestedRef === undefined ? {} : { requestedRef: input.requestedRef }),
-      resolvedCommit,
-      managedPath: finalRoot
-    };
-    return await registerManagedPiApp(finalAppRoot, sourceInfo);
+    const prepared = await prepareInstall(source, input.requestedRef, tempRoot);
+    await confirmInstall(input, prepared.loaded);
+    await runBuildCommands(prepared.loaded.manifest.build ?? [], prepared.appRoot);
+    return await registerPreparedInstall(prepared, input.requestedRef);
   } finally {
     await rm(tempRoot, { recursive: true, force: true });
   }
+}
+
+async function prepareInstall(
+  source: GithubSource,
+  requestedRef: string | undefined,
+  tempRoot: string
+): Promise<PreparedInstall> {
+  const checkout = path.join(tempRoot, "checkout");
+  await git(["clone", "--depth", "1", ...refArgs(requestedRef), githubUrl(source), checkout]);
+  const resolvedCommit = await gitOutput(["-C", checkout, "rev-parse", "HEAD"]);
+  const appRoot = source.subdir === undefined ? checkout : path.join(checkout, source.subdir);
+  return {
+    source,
+    checkout,
+    appRoot,
+    resolvedCommit,
+    loaded: await loadPiApp({ appDir: appRoot })
+  };
+}
+
+async function confirmInstall(
+  input: InstallInput,
+  loaded: Awaited<ReturnType<typeof loadPiApp>>
+): Promise<void> {
+  if (input.yes) {
+    return;
+  }
+  if (!process.stdin.isTTY) {
+    throw new Error("remote app install requires --yes when stdin is not interactive");
+  }
+  process.stderr.write(`Pi app install preview:\n`);
+  process.stderr.write(`  id: ${loaded.manifest.id}\n`);
+  process.stderr.write(`  name: ${loaded.manifest.name}\n`);
+  process.stderr.write(`  source: ${input.source}\n`);
+  if (!(await confirm("Install this Pi app?"))) {
+    throw new Error("Pi app install cancelled");
+  }
+}
+
+async function registerPreparedInstall(
+  prepared: PreparedInstall,
+  requestedRef: string | undefined
+): Promise<InstalledPiApp> {
+  const finalRoot = path.join(
+    managedAppsDir(),
+    `${safePathComponent(prepared.loaded.manifest.id)}-${safePathComponent(prepared.resolvedCommit.slice(0, 12))}`
+  );
+  await rm(finalRoot, { recursive: true, force: true });
+  await mkdir(path.dirname(finalRoot), { recursive: true });
+  await rename(prepared.checkout, finalRoot);
+  const finalAppRoot =
+    prepared.source.subdir === undefined ? finalRoot : path.join(finalRoot, prepared.source.subdir);
+  return await registerManagedPiApp(finalAppRoot, sourceInfo(prepared, finalRoot, requestedRef));
+}
+
+function sourceInfo(
+  prepared: PreparedInstall,
+  managedPath: string,
+  requestedRef: string | undefined
+): PiAppSourceInfo {
+  return {
+    kind: "github",
+    owner: prepared.source.owner,
+    repo: prepared.source.repo,
+    ...(prepared.source.subdir === undefined ? {} : { subdir: prepared.source.subdir }),
+    ...(requestedRef === undefined ? {} : { requestedRef }),
+    resolvedCommit: prepared.resolvedCommit,
+    managedPath
+  };
 }
 
 export function parseGithubSource(value: string): GithubSource {
@@ -89,9 +134,9 @@ async function runBuildCommands(commands: readonly PiBuildCommand[], cwd: string
       continue;
     }
     if (build.command.length === 0) {
-      throw new Error(`build[${index}].command must not be empty`);
+      throw new Error(`build[${String(index)}].command must not be empty`);
     }
-    await runCommand(build.command, cwd, `build[${index}]`);
+    await runCommand(build.command, cwd, `build[${String(index)}]`);
   }
 }
 
@@ -122,7 +167,7 @@ async function runCommand(command: readonly string[], cwd: string, label: string
     throw new Error(`${label} terminated by signal ${signal}`);
   }
   if (code !== 0) {
-    throw new Error(`${label} failed with exit code ${code}`);
+    throw new Error(`${label} failed with exit code ${String(code)}`);
   }
 }
 
@@ -145,7 +190,7 @@ async function outputCommand(command: readonly string[]): Promise<string> {
     throw new Error(`${program} terminated by signal ${signal}: ${stderr.trim()}`);
   }
   if (code !== 0) {
-    throw new Error(`${program} failed with exit code ${code}: ${stderr.trim()}`);
+    throw new Error(`${program} failed with exit code ${String(code)}: ${stderr.trim()}`);
   }
   return stdout.trim();
 }

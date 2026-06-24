@@ -22,11 +22,5 @@ export {
   validatePiAppManifest
 } from "./manifest.js";
 export { writePiRuntimeConfig } from "./runtime-config.js";
-export {
-  linkPiApp,
-  listPiApps,
-  loadAppIndex,
-  saveAppIndex,
-  uninstallPiApp
-} from "./registry.js";
+export { linkPiApp, listPiApps, loadAppIndex, saveAppIndex, uninstallPiApp } from "./registry.js";
 export { installPiApp } from "./install.js";

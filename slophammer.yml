@@ -1,0 +1,53 @@
+typescript:
+  coverage:
+    threshold: 85
+  complexity:
+    max: 8
+  dry:
+    max_findings: 0
+    paths:
+      - src
+    exclude:
+      - pattern: "src/types.ts"
+        reason: Shared TypeScript type declarations have no executable logic to deduplicate
+    copied_blocks:
+      enabled: true
+      min_tokens: 100
+  mutation:
+    targets:
+      - src/manifest.ts
+      - src/runtime-config.ts
+      - src/launch.ts
+  dependency_boundaries:
+    - from: src/cli
+      allow:
+        - src/init
+        - src/install
+        - src/launch
+        - src/manifest
+        - src/registry
+        - src/runtime-config
+    - from: src/install
+      allow:
+        - src/manifest
+        - src/paths
+        - src/registry
+        - src/types
+    - from: src/launch
+      allow:
+        - src/runtime-config
+        - src/types
+    - from: src/manifest
+      allow:
+        - src/paths
+        - src/registry
+        - src/types
+    - from: src/registry
+      allow:
+        - src/manifest
+        - src/paths
+        - src/types
+    - from: src/runtime-config
+      allow:
+        - src/json
+        - src/types

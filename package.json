@@ -33,17 +33,33 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "format": "prettier --check .",
+    "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "check": "npm run typecheck && npm test && npm run build",
+    "coverage": "vitest run --coverage",
+    "dry": "slophammer-ts dry .",
+    "boundaries": "slophammer-ts boundaries .",
+    "mutate": "stryker run",
+    "slophammer": "slophammer-ts check .",
+    "check": "npm run format && npm run lint && npm run typecheck && npm test && npm run coverage && npm run build && npm run dry && npm run boundaries && npm run slophammer",
     "prepare": "npm run build"
   },
   "dependencies": {
     "smol-toml": "^1.4.2"
   },
   "devDependencies": {
+    "@eslint/js": "^9.0.0",
+    "@stryker-mutator/core": "^9.6.1",
+    "@stryker-mutator/typescript-checker": "^9.6.1",
+    "@stryker-mutator/vitest-runner": "^9.6.1",
     "@types/node": "^22.0.0",
+    "@vitest/coverage-v8": "^3.0.0",
+    "eslint": "^9.0.0",
+    "prettier": "^3.0.0",
+    "slophammer-ts": "0.4.0",
     "typescript": "^5.0.0",
+    "typescript-eslint": "^8.0.0",
     "vitest": "^3.0.0"
   }
 }

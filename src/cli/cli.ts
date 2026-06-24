@@ -13,38 +13,37 @@ export type CliResult = {
   readonly stderr: string;
 };
 
+type CommandHandler = (args: readonly string[]) => Promise<CliResult>;
+
+const COMMANDS: Readonly<Record<string, CommandHandler>> = {
+  plan: async (args) => ok(`${JSON.stringify(await plan(args), null, 2)}\n`),
+  run: async (args) => exitCode(await runApp(args)),
+  validate: async (args) => ok(await validate(args)),
+  init: async (args) => ok(`created ${await init(args)}\n`),
+  link: async (args) => ok(`${JSON.stringify(await link(args), null, 2)}\n`),
+  install: async (args) => ok(`${JSON.stringify(await install(args), null, 2)}\n`),
+  uninstall: async (args) => ok(`${(await uninstall(args)) ? "uninstalled" : "not installed"}\n`),
+  list: async () => ok(`${JSON.stringify(await listPiApps(), null, 2)}\n`),
+  inspect: async (args) => ok(`${JSON.stringify(await inspect(args), null, 2)}\n`)
+};
+
 export async function run(args: readonly string[]): Promise<CliResult> {
   const command = args[0];
   try {
-    switch (command) {
-      case "plan":
-        return ok(`${JSON.stringify(await plan(args.slice(1)), null, 2)}\n`);
-      case "run":
-        return exitCode(await runApp(args.slice(1)));
-      case "validate":
-        return ok(await validate(args.slice(1)));
-      case "init":
-        return ok(`created ${await init(args.slice(1))}\n`);
-      case "link":
-        return ok(`${JSON.stringify(await link(args.slice(1)), null, 2)}\n`);
-      case "install":
-        return ok(`${JSON.stringify(await install(args.slice(1)), null, 2)}\n`);
-      case "uninstall":
-        return ok(`${(await uninstall(args.slice(1))) ? "uninstalled" : "not installed"}\n`);
-      case "list":
-        return ok(`${JSON.stringify(await listPiApps(), null, 2)}\n`);
-      case "inspect":
-        return ok(`${JSON.stringify(await inspect(args.slice(1)), null, 2)}\n`);
-      case "-h":
-      case "--help":
-      case "help":
-      case undefined:
-        return ok(usage());
-      default:
-        return { code: 2, stdout: "", stderr: `${usage()}unknown command: ${command}\n` };
+    if (isHelpCommand(command)) {
+      return ok(usage());
     }
+    const handler = command === undefined ? undefined : COMMANDS[command];
+    if (handler === undefined || command === undefined) {
+      return { code: 2, stdout: "", stderr: `${usage()}unknown command: ${command ?? ""}\n` };
+    }
+    return await handler(args.slice(1));
   } catch (error) {
-    return { code: 1, stdout: "", stderr: error instanceof Error ? `${error.message}\n` : `${String(error)}\n` };
+    return {
+      code: 1,
+      stdout: "",
+      stderr: error instanceof Error ? `${error.message}\n` : `${String(error)}\n`
+    };
   }
 }
 
@@ -63,6 +62,10 @@ async function plan(args: readonly string[]): Promise<unknown> {
     launch: await createPiLaunchPlan(app),
     note: "plan does not write runtime config or launch Pi"
   };
+}
+
+function isHelpCommand(command: string | undefined): boolean {
+  return command === "-h" || command === "--help" || command === "help";
 }
 
 async function runApp(args: readonly string[]): Promise<number> {
@@ -102,9 +105,13 @@ async function install(args: readonly string[]): Promise<unknown> {
       index += 1;
       continue;
     }
-    throw new Error(`unknown option: ${arg}`);
+    throw new Error(`unknown option: ${String(arg)}`);
   }
-  return await installPiApp({ source, ...(requestedRef === undefined ? {} : { requestedRef }), yes });
+  return await installPiApp({
+    source,
+    ...(requestedRef === undefined ? {} : { requestedRef }),
+    yes
+  });
 }
 
 async function uninstall(args: readonly string[]): Promise<boolean> {
@@ -120,31 +127,46 @@ async function inspect(args: readonly string[]): Promise<unknown> {
   };
 }
 
-function parseAppArgs(args: readonly string[]): { app?: string; appFile?: string; appDir?: string } {
-  let app: string | undefined;
-  let appFile: string | undefined;
-  let appDir: string | undefined;
+function parseAppArgs(args: readonly string[]): {
+  app?: string;
+  appFile?: string;
+  appDir?: string;
+} {
+  const parsed: { app?: string; appFile?: string; appDir?: string } = {};
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
-    if (arg === "--app-file") {
-      appFile = required(args[index + 1], "--app-file requires a value");
+    if (arg === undefined) {
+      throw new Error("missing argument");
+    }
+    if (setPathOption(parsed, arg, args[index + 1])) {
       index += 1;
       continue;
     }
-    if (arg === "--app-dir") {
-      appDir = required(args[index + 1], "--app-dir requires a value");
-      index += 1;
-      continue;
-    }
-    if (arg?.startsWith("--") === true) {
+    if (arg.startsWith("--")) {
       throw new Error(`unknown option: ${arg}`);
     }
-    app = arg;
+    parsed.app = arg;
   }
-  if (appFile !== undefined || appDir !== undefined) {
-    return { ...(app === undefined ? {} : { app }), ...(appFile === undefined ? {} : { appFile }), ...(appDir === undefined ? {} : { appDir }) };
+  if (parsed.appFile !== undefined || parsed.appDir !== undefined) {
+    return parsed;
   }
-  return { app: required(app, "usage: pi-factory <plan|run|inspect> <app-id>") };
+  return { app: required(parsed.app, "usage: pi-factory <plan|run|inspect> <app-id>") };
+}
+
+function setPathOption(
+  parsed: { appFile?: string; appDir?: string },
+  arg: string | undefined,
+  next: string | undefined
+): boolean {
+  if (arg === "--app-file") {
+    parsed.appFile = required(next, "--app-file requires a value");
+    return true;
+  }
+  if (arg === "--app-dir") {
+    parsed.appDir = required(next, "--app-dir requires a value");
+    return true;
+  }
+  return false;
 }
 
 async function validateTarget(

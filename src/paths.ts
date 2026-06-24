@@ -15,18 +15,20 @@ export function managedAppsDir(): string {
 
 export function expandPath(value: string, baseDir?: string): string {
   const expandedHome = value === "~" ? os.homedir() : value.replace(/^~(?=\/|$)/u, os.homedir());
-  const expandedEnv = expandedHome.replace(/\$([A-Za-z_][A-Za-z0-9_]*)|\$\{([^}]+)\}/gu, (
-    match,
-    bare: string | undefined,
-    braced: string | undefined
-  ) => {
-    const key = bare ?? braced;
-    return key === undefined ? match : (process.env[key] ?? "");
-  });
+  const expandedEnv = expandedHome.replace(
+    /\$([A-Za-z_][A-Za-z0-9_]*)|\$\{([^}]+)\}/gu,
+    (match, bare: string | undefined, braced: string | undefined) => {
+      const key = bare ?? braced;
+      return key === undefined ? match : (process.env[key] ?? "");
+    }
+  );
   return path.resolve(baseDir ?? process.cwd(), expandedEnv);
 }
 
-export function optionalExpandPath(value: string | undefined, baseDir?: string): string | undefined {
+export function optionalExpandPath(
+  value: string | undefined,
+  baseDir?: string
+): string | undefined {
   return value === undefined ? undefined : expandPath(value, baseDir);
 }
 

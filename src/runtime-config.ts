@@ -46,7 +46,8 @@ function modelConfig(model: PiModelDefinition): unknown {
     id: model.id,
     name: model.name ?? model.id,
     reasoning: model.reasoning ?? false,
-    compat: model.thinkingFormat === undefined ? undefined : { thinkingFormat: model.thinkingFormat },
+    compat:
+      model.thinkingFormat === undefined ? undefined : { thinkingFormat: model.thinkingFormat },
     input: model.input ?? ["text"],
     contextWindow: model.contextWindow,
     maxTokens: model.maxTokens,

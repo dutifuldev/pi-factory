@@ -20,6 +20,34 @@ export type LoadPiAppInput = {
   readonly searchDirs?: readonly string[];
 };
 
+type TopLevelManifestFields = Pick<
+  PiAppManifest,
+  | "id"
+  | "name"
+  | "version"
+  | "schema_version"
+  | "state_dir"
+  | "description"
+  | "session_dir"
+  | "pi_command"
+  | "thinking"
+  | "tools"
+  | "system_prompt"
+  | "env"
+>;
+
+type Mutable<T> = {
+  -readonly [K in keyof T]: T[K];
+};
+
+type ExtensionDefinitions = NonNullable<PiAppDefinition["extensions"]>;
+
+type ProviderManifestFields = PiAppManifest["provider"];
+
+type ModelManifestFields = PiAppManifest["model"];
+
+type CollectionManifestFields = Pick<PiAppManifest, "extensions" | "build">;
+
 export async function loadPiApp(input: LoadPiAppInput): Promise<{
   readonly manifest: PiAppManifest;
   readonly manifestPath: string;
@@ -45,51 +73,10 @@ export function validatePiAppManifest(value: unknown, source = "pi-app.toml"): P
     throw new Error(`${source}: manifest must be a TOML table`);
   }
   const errors: string[] = [];
-  const id = stringField(value, "id", errors);
-  const name = stringField(value, "name", errors);
-  const version = stringField(value, "version", errors);
-  const schemaVersion = numberField(value, "schema_version", errors);
-  if (schemaVersion !== undefined && schemaVersion !== 1) {
-    errors.push("schema_version must be 1");
-  }
-  const stateDir = stringField(value, "state_dir", errors);
-  const provider = tableField(value, "provider", errors);
-  const model = tableField(value, "model", errors);
-  const providerId = provider === undefined ? undefined : stringField(provider, "id", errors);
-  const providerBaseUrl =
-    provider === undefined ? undefined : stringField(provider, "base_url", errors);
-  const modelId = model === undefined ? undefined : stringField(model, "id", errors);
-
-  if (id !== undefined && !/^[A-Za-z0-9._:-]+$/u.test(id)) {
-    errors.push("id may only contain ASCII letters, digits, dot, colon, underscore, and hyphen");
-  }
-  const thinking = optionalString(value, "thinking");
-  if (thinking !== undefined && !isThinkingLevel(thinking)) {
-    errors.push("thinking must be one of off, minimal, low, medium, high, xhigh");
-  }
-
-  const description = optionalString(value, "description");
-  const sessionDir = optionalString(value, "session_dir");
-  const piCommand = optionalString(value, "pi_command");
-  const tools = stringArrayField(value, "tools", false, errors);
-  const systemPrompt = optionalString(value, "system_prompt");
-  const providerApi = provider === undefined ? undefined : optionalString(provider, "api");
-  if (providerApi !== undefined && !isProviderApi(providerApi)) {
-    errors.push("provider.api must be openai-completions");
-  }
-  const modelName = model === undefined ? undefined : optionalString(model, "name");
-  const modelContextWindow =
-    model === undefined ? undefined : optionalNumber(model, "context_window", errors);
-  const modelMaxTokens = model === undefined ? undefined : optionalNumber(model, "max_tokens", errors);
-  const modelReasoning = model === undefined ? undefined : optionalBoolean(model, "reasoning", errors);
-  const modelThinkingFormat =
-    model === undefined ? undefined : optionalString(model, "thinking_format");
-  if (modelThinkingFormat !== undefined && !isThinkingFormat(modelThinkingFormat)) {
-    errors.push("model.thinking_format must be deepseek or qwen-chat-template");
-  }
-  const env = recordStringField(value, "env", false, errors);
-  const extensions = extensionsField(value, errors);
-  const build = buildField(value, errors);
+  const topLevel = readTopLevelFields(value, errors);
+  const provider = readProviderFields(value, errors);
+  const model = readModelFields(value, errors);
+  const collections = readCollectionFields(value, errors);
 
   if (errors.length > 0) {
     throw new Error(
@@ -98,128 +85,252 @@ export function validatePiAppManifest(value: unknown, source = "pi-app.toml"): P
   }
 
   return {
-    id: id as string,
-    name: name as string,
-    version: version as string,
-    schema_version: schemaVersion as number,
-    ...(description === undefined ? {} : { description }),
-    state_dir: stateDir as string,
-    ...(sessionDir === undefined ? {} : { session_dir: sessionDir }),
-    ...(piCommand === undefined ? {} : { pi_command: piCommand }),
-    ...(thinking === undefined ? {} : { thinking: thinking as PiThinkingLevel }),
-    ...(tools === undefined ? {} : { tools }),
-    ...(systemPrompt === undefined ? {} : { system_prompt: systemPrompt }),
-    provider: {
-      id: providerId as string,
-      base_url: providerBaseUrl as string,
-      ...(providerApi === undefined ? {} : { api: providerApi as PiProviderApi })
-    },
-    model: {
-      id: modelId as string,
-      ...(modelName === undefined ? {} : { name: modelName }),
-      ...(modelContextWindow === undefined ? {} : { context_window: modelContextWindow }),
-      ...(modelMaxTokens === undefined ? {} : { max_tokens: modelMaxTokens }),
-      ...(modelReasoning === undefined ? {} : { reasoning: modelReasoning }),
-      ...(modelThinkingFormat === undefined
-        ? {}
-        : { thinking_format: modelThinkingFormat as PiThinkingFormat })
-    },
-    ...(env === undefined ? {} : { env }),
+    ...topLevel,
+    provider,
+    model,
+    ...collections
+  };
+}
+
+function readTopLevelFields(
+  value: Record<string, unknown>,
+  errors: string[]
+): TopLevelManifestFields {
+  const fields: Partial<Mutable<TopLevelManifestFields>> = {};
+  const schemaVersion = numberField(value, "schema_version", errors);
+  if (schemaVersion !== undefined && schemaVersion !== 1) {
+    errors.push("schema_version must be 1");
+  }
+  const id = stringField(value, "id", errors);
+  if (id !== undefined && !/^[A-Za-z0-9._:-]+$/u.test(id)) {
+    errors.push("id may only contain ASCII letters, digits, dot, colon, underscore, and hyphen");
+  }
+  const thinking = optionalString(value, "thinking", errors);
+  if (thinking !== undefined && !isThinkingLevel(thinking)) {
+    errors.push("thinking must be one of off, minimal, low, medium, high, xhigh");
+  }
+
+  const description = optionalString(value, "description", errors);
+  const sessionDir = optionalString(value, "session_dir", errors);
+  const piCommand = optionalString(value, "pi_command", errors);
+  const tools = stringArrayField(value, "tools", false, errors);
+  const systemPrompt = optionalString(value, "system_prompt", errors);
+  const env = recordStringField(value, "env", false, errors);
+  fields.id = id as string;
+  fields.name = stringField(value, "name", errors) as string;
+  fields.version = stringField(value, "version", errors) as string;
+  fields.schema_version = schemaVersion as number;
+  fields.state_dir = stringField(value, "state_dir", errors) as string;
+  assignDefined(fields, "description", description);
+  assignDefined(fields, "session_dir", sessionDir);
+  assignDefined(fields, "pi_command", piCommand);
+  assignDefined(fields, "thinking", thinking as PiThinkingLevel | undefined);
+  assignDefined(fields, "tools", tools);
+  assignDefined(fields, "system_prompt", systemPrompt);
+  assignDefined(fields, "env", env);
+  return fields as TopLevelManifestFields;
+}
+
+function readProviderFields(
+  value: Record<string, unknown>,
+  errors: string[]
+): ProviderManifestFields {
+  const provider = tableField(value, "provider", errors);
+  const providerApi = provider === undefined ? undefined : optionalString(provider, "api", errors);
+  if (providerApi !== undefined && !isProviderApi(providerApi)) {
+    errors.push("provider.api must be openai-completions");
+  }
+  return {
+    id: (provider === undefined ? undefined : stringField(provider, "id", errors)) as string,
+    base_url: (provider === undefined
+      ? undefined
+      : stringField(provider, "base_url", errors)) as string,
+    ...(providerApi === undefined ? {} : { api: providerApi as PiProviderApi })
+  };
+}
+
+function readModelFields(value: Record<string, unknown>, errors: string[]): ModelManifestFields {
+  const model = tableField(value, "model", errors);
+  if (model === undefined) {
+    return {} as ModelManifestFields;
+  }
+  const fields: Partial<Mutable<ModelManifestFields>> = {
+    id: stringField(model, "id", errors) as string
+  };
+  assignModelOptions(fields, model, errors);
+  return fields as ModelManifestFields;
+}
+
+function assignModelOptions(
+  fields: Partial<Mutable<ModelManifestFields>>,
+  model: Record<string, unknown>,
+  errors: string[]
+): void {
+  assignDefined(fields, "name", optionalString(model, "name", errors));
+  assignDefined(fields, "context_window", optionalNumber(model, "context_window", errors));
+  assignDefined(fields, "max_tokens", optionalNumber(model, "max_tokens", errors));
+  assignDefined(fields, "reasoning", optionalBoolean(model, "reasoning", errors));
+  assignDefined(fields, "thinking_format", thinkingFormatField(model, errors));
+}
+
+function thinkingFormatField(
+  model: Record<string, unknown>,
+  errors: string[]
+): PiThinkingFormat | undefined {
+  const thinkingFormat = optionalString(model, "thinking_format", errors);
+  if (thinkingFormat !== undefined && !isThinkingFormat(thinkingFormat)) {
+    errors.push("model.thinking_format must be deepseek or qwen-chat-template");
+    return undefined;
+  }
+  return thinkingFormat;
+}
+
+function readCollectionFields(
+  value: Record<string, unknown>,
+  errors: string[]
+): CollectionManifestFields {
+  const extensions = extensionsField(value, errors);
+  const build = buildField(value, errors);
+  return {
     ...(extensions === undefined ? {} : { extensions }),
     ...(build === undefined ? {} : { build })
   };
+}
+
+function assignDefined<T extends object, K extends keyof T>(
+  target: Partial<T>,
+  key: K,
+  value: T[K] | undefined
+): void {
+  if (value !== undefined) {
+    target[key] = value;
+  }
 }
 
 export async function manifestToDefinition(
   manifest: PiAppManifest,
   appRoot: string
 ): Promise<PiAppDefinition> {
-  const systemPromptPath = optionalExpandPath(manifest.system_prompt, appRoot);
-  const systemPrompt =
-    systemPromptPath === undefined ? undefined : await readFile(systemPromptPath, "utf8");
-  const extensions = await Promise.all(
-    (manifest.extensions ?? []).map(async (extension) => {
-      const appendPath = optionalExpandPath(extension.append_system_prompt, appRoot);
-      return {
-        path: expandPath(extension.path, appRoot),
-        ...(appendPath === undefined ? {} : { appendSystemPrompt: await readFile(appendPath, "utf8") })
-      };
-    })
-  );
-  return {
+  const app: Partial<PiAppDefinition> = {
     id: manifest.id,
     name: manifest.name,
     version: manifest.version,
-    ...(manifest.description === undefined ? {} : { description: manifest.description }),
     rootDir: appRoot,
     stateDir: expandPath(manifest.state_dir, appRoot),
     sessionDir: expandPath(manifest.session_dir ?? `${manifest.state_dir}/sessions`, appRoot),
     piCommand: manifest.pi_command ?? "npx -y @earendil-works/pi-coding-agent@latest",
-    providers: [
-      {
-        id: manifest.provider.id,
-        baseUrl: manifest.provider.base_url,
-        api: manifest.provider.api ?? "openai-completions",
-        models: [
-          {
-            id: manifest.model.id,
-            name: manifest.model.name ?? manifest.model.id,
-            reasoning: manifest.model.reasoning ?? false,
-            ...(manifest.model.thinking_format === undefined
-              ? {}
-              : { thinkingFormat: manifest.model.thinking_format }),
-            input: ["text"],
-            ...(manifest.model.context_window === undefined
-              ? {}
-              : { contextWindow: manifest.model.context_window }),
-            ...(manifest.model.max_tokens === undefined ? {} : { maxTokens: manifest.model.max_tokens })
-          }
-        ]
-      }
-    ],
+    providers: [providerDefinition(manifest)],
     defaultProvider: manifest.provider.id,
     defaultModel: manifest.model.id,
-    thinking: manifest.thinking ?? "medium",
-    ...(manifest.tools === undefined ? {} : { tools: manifest.tools.join(",") }),
-    ...(systemPrompt === undefined ? {} : { systemPrompt }),
-    ...(extensions.length === 0 ? {} : { extensions }),
-    ...(manifest.env === undefined ? {} : { env: manifest.env }),
-    ...(manifest.build === undefined ? {} : { build: manifest.build })
+    thinking: manifest.thinking ?? "medium"
+  };
+  assignDefined(app, "description", manifest.description);
+  assignDefined(app, "tools", manifest.tools?.join(","));
+  assignDefined(app, "systemPrompt", await systemPromptText(manifest, appRoot));
+  assignDefined(app, "env", manifest.env);
+  assignDefined(app, "build", manifest.build);
+  const extensions = await extensionDefinitions(manifest, appRoot);
+  assignDefined(app, "extensions", extensions.length === 0 ? undefined : extensions);
+  return app as PiAppDefinition;
+}
+
+function providerDefinition(manifest: PiAppManifest): PiAppDefinition["providers"][number] {
+  return {
+    id: manifest.provider.id,
+    baseUrl: manifest.provider.base_url,
+    api: manifest.provider.api ?? "openai-completions",
+    models: [modelDefinition(manifest)]
   };
 }
 
+function modelDefinition(
+  manifest: PiAppManifest
+): PiAppDefinition["providers"][number]["models"][number] {
+  const model: Partial<PiAppDefinition["providers"][number]["models"][number]> = {
+    id: manifest.model.id,
+    name: manifest.model.name ?? manifest.model.id,
+    reasoning: manifest.model.reasoning ?? false,
+    input: ["text"]
+  };
+  assignDefined(model, "thinkingFormat", manifest.model.thinking_format);
+  assignDefined(model, "contextWindow", manifest.model.context_window);
+  assignDefined(model, "maxTokens", manifest.model.max_tokens);
+  return model as PiAppDefinition["providers"][number]["models"][number];
+}
+
+async function systemPromptText(
+  manifest: PiAppManifest,
+  appRoot: string
+): Promise<string | undefined> {
+  const systemPromptPath = optionalExpandPath(manifest.system_prompt, appRoot);
+  return systemPromptPath === undefined ? undefined : await readFile(systemPromptPath, "utf8");
+}
+
+async function extensionDefinitions(
+  manifest: PiAppManifest,
+  appRoot: string
+): Promise<ExtensionDefinitions> {
+  return await Promise.all(
+    (manifest.extensions ?? []).map(async (extension) => {
+      const resolved = { path: expandPath(extension.path, appRoot) };
+      const appendPath = optionalExpandPath(extension.append_system_prompt, appRoot);
+      if (appendPath === undefined) {
+        return resolved;
+      }
+      return { ...resolved, appendSystemPrompt: await readFile(appendPath, "utf8") };
+    })
+  );
+}
+
 async function resolveManifestPath(input: LoadPiAppInput): Promise<string> {
+  const explicit = explicitManifestPath(input);
+  if (explicit !== undefined) {
+    return explicit;
+  }
+  const app = input.app;
+  if (app === undefined) {
+    throw new Error("app, appFile, or appDir is required");
+  }
+  return await appManifestPath(app, input.searchDirs ?? []);
+}
+
+function explicitManifestPath(input: LoadPiAppInput): string | undefined {
   if (input.appFile !== undefined) {
     return expandPath(input.appFile);
   }
-  if (input.appDir !== undefined) {
-    return path.join(expandPath(input.appDir), "pi-app.toml");
-  }
-  if (input.app === undefined) {
-    throw new Error("app, appFile, or appDir is required");
-  }
+  return input.appDir === undefined
+    ? undefined
+    : path.join(expandPath(input.appDir), "pi-app.toml");
+}
+
+async function appManifestPath(app: string, searchDirs: readonly string[]): Promise<string> {
   const candidates: string[] = [];
-  for (const searchDir of input.searchDirs ?? []) {
-    candidates.push(path.join(expandPath(searchDir), input.app, "pi-app.toml"));
+  for (const searchDir of searchDirs) {
+    candidates.push(path.join(expandPath(searchDir), app, "pi-app.toml"));
   }
-  candidates.push(path.join(process.cwd(), ".pi", "apps", input.app, "pi-app.toml"));
-  const installed = await findInstalledApp(input.app);
+  candidates.push(path.join(process.cwd(), ".pi", "apps", app, "pi-app.toml"));
+  const installed = await findInstalledApp(app);
   if (installed !== undefined) {
     candidates.push(installed.manifestPath);
   }
-  const existing = [];
+  const existing = await existingFiles(candidates);
+  if (existing.length === 0) {
+    throw new Error(`Pi app not found: ${app}`);
+  }
+  if (existing.length > 1) {
+    throw new Error(`Pi app is ambiguous: ${app}\n${existing.join("\n")}`);
+  }
+  return existing[0] as string;
+}
+
+async function existingFiles(candidates: readonly string[]): Promise<readonly string[]> {
+  const existing: string[] = [];
   for (const candidate of candidates) {
     if (await fileExists(candidate)) {
       existing.push(candidate);
     }
   }
-  if (existing.length === 0) {
-    throw new Error(`Pi app not found: ${input.app}`);
-  }
-  if (existing.length > 1) {
-    throw new Error(`Pi app is ambiguous: ${input.app}\n${existing.join("\n")}`);
-  }
-  return existing[0] as string;
+  return existing;
 }
 
 async function fileExists(file: string): Promise<boolean> {
@@ -274,9 +385,20 @@ function tableField(
   return undefined;
 }
 
-function optionalString(value: Record<string, unknown>, key: string): string | undefined {
+function optionalString(
+  value: Record<string, unknown>,
+  key: string,
+  errors: string[]
+): string | undefined {
   const entry = value[key];
-  return typeof entry === "string" ? entry : undefined;
+  if (entry === undefined) {
+    return undefined;
+  }
+  if (typeof entry === "string") {
+    return entry;
+  }
+  errors.push(`${key} must be a string`);
+  return undefined;
 }
 
 function optionalNumber(
@@ -359,7 +481,7 @@ function extensionsField(
   }
   return entry.flatMap((item, index) => {
     if (!isRecord(item) || typeof item["path"] !== "string") {
-      errors.push(`extensions[${index}].path is required`);
+      errors.push(`extensions[${String(index)}].path is required`);
       return [];
     }
     return [
@@ -387,22 +509,22 @@ function buildField(
   }
   return entry.flatMap((item, index) => {
     if (!isRecord(item) || !Array.isArray(item["command"])) {
-      errors.push(`build[${index}].command is required`);
+      errors.push(`build[${String(index)}].command is required`);
       return [];
     }
     const command = item["command"];
     if (!command.every((part) => typeof part === "string")) {
-      errors.push(`build[${index}].command must be an array of strings`);
+      errors.push(`build[${String(index)}].command must be an array of strings`);
       return [];
     }
     const platforms = stringArrayField(item, "platforms", false, errors);
     if (platforms !== undefined && !platforms.every(isPlatform)) {
-      errors.push(`build[${index}].platforms must contain only linux, macos, or windows`);
+      errors.push(`build[${String(index)}].platforms must contain only linux, macos, or windows`);
       return [];
     }
     return [
       {
-        command: command as readonly string[],
+        command,
         ...(platforms === undefined ? {} : { platforms })
       }
     ];
