@@ -1,0 +1,65 @@
+{
+  "name": "pi-factory",
+  "version": "0.1.0",
+  "description": "Declarative Pi application bundle launcher.",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dutifuldev/pi-factory.git"
+  },
+  "bugs": {
+    "url": "https://github.com/dutifuldev/pi-factory/issues"
+  },
+  "homepage": "https://github.com/dutifuldev/pi-factory#readme",
+  "publishConfig": {
+    "access": "public"
+  },
+  "bin": {
+    "pi-factory": "dist/src/cli/main.js"
+  },
+  "types": "dist/src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "default": "./dist/src/index.js"
+    }
+  },
+  "files": [
+    "dist/src/**",
+    "docs/**",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "format": "prettier --check .",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "coverage": "vitest run --coverage",
+    "dry": "slophammer-ts dry .",
+    "boundaries": "slophammer-ts boundaries .",
+    "mutate": "stryker run",
+    "slophammer": "slophammer-ts check .",
+    "check": "npm run format && npm run lint && npm run typecheck && npm test && npm run coverage && npm run build && npm run dry && npm run boundaries && npm run slophammer",
+    "prepare": "npm run build"
+  },
+  "dependencies": {
+    "smol-toml": "^1.4.2"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.0.0",
+    "@stryker-mutator/core": "^9.6.1",
+    "@stryker-mutator/typescript-checker": "^9.6.1",
+    "@stryker-mutator/vitest-runner": "^9.6.1",
+    "@types/node": "^22.0.0",
+    "@vitest/coverage-v8": "^3.0.0",
+    "eslint": "^9.0.0",
+    "prettier": "^3.0.0",
+    "slophammer-ts": "0.4.0",
+    "typescript": "^5.0.0",
+    "typescript-eslint": "^8.0.0",
+    "vitest": "^3.0.0"
+  }
+}
