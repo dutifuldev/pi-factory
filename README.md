@@ -1,9 +1,155 @@
 # pi-factory
 
-Pi Factory defines standalone Pi-based applications with declarative app bundles.
+Pi Factory turns a small `pi-app.toml` bundle into a native Pi launch.
 
-The goal is to make Pi app bundles easy to create without replacing Pi's native TUI,
-configuration files, provider model, or extension SDK.
+Use it when you want a named standalone Pi app with its own model/provider
+config, prompts, extensions, state directory, and session directory, while still
+using Pi's normal CLI, TUI, model picker, slash commands, and extension SDK.
 
-Start with [docs/spec.md](docs/spec.md) and the manifest reference in
-[docs/manifest-v1.md](docs/manifest-v1.md).
+Pi Factory does not replace Pi and does not manage local model servers by
+default. App projects such as `localpi` decide how models are discovered or
+started; Pi Factory resolves the app bundle and launches Pi with the right
+config.
+
+## Install
+
+From this repository:
+
+```bash
+npm install -g github:dutifuldev/pi-factory
+```
+
+During development:
+
+```bash
+npm install
+npm run build
+node dist/src/cli/main.js --help
+```
+
+## Create an App Bundle
+
+```bash
+pi-factory init my-app
+```
+
+That creates:
+
+```text
+my-app/
+  pi-app.toml
+  prompts/system.md
+  extensions/
+```
+
+Minimal `pi-app.toml`:
+
+```toml
+id = "my-app"
+name = "My App"
+version = "0.1.0"
+schema_version = 1
+state_dir = "~/.local/state/my-app"
+pi_command = "npx -y @earendil-works/pi-coding-agent@latest"
+thinking = "medium"
+tools = ["read", "bash"]
+system_prompt = "prompts/system.md"
+
+[provider]
+id = "local-openai"
+base_url = "http://127.0.0.1:1234/v1"
+api = "openai-completions"
+
+[model]
+id = "auto"
+context_window = 32768
+max_tokens = 8192
+reasoning = false
+```
+
+Add Pi extensions with normal Pi extension files:
+
+```toml
+[[extensions]]
+path = "extensions/demo.ts"
+append_system_prompt = "prompts/demo.md"
+```
+
+Paths are relative to the app bundle root unless absolute.
+
+## Run
+
+Inspect the resolved launch without starting Pi:
+
+```bash
+pi-factory plan --app-dir ./my-app
+```
+
+Validate a bundle:
+
+```bash
+pi-factory validate ./my-app
+```
+
+Launch Pi through the app bundle:
+
+```bash
+pi-factory run --app-dir ./my-app
+```
+
+The launch writes Pi-compatible runtime config under the app state directory,
+then starts the configured Pi command with environment variables such as
+`PI_CODING_AGENT_DIR` and `PI_CODING_AGENT_SESSION_DIR`.
+
+## Link and Install Apps
+
+For local app bundles:
+
+```bash
+pi-factory link /path/to/my-app
+pi-factory run my-app
+```
+
+For GitHub-hosted bundles:
+
+```bash
+pi-factory install owner/repo[/subdir...] --ref main --yes
+pi-factory run my-app
+```
+
+There is no central registry. The app name comes from the installed bundle's
+manifest `id`.
+
+## Commands
+
+```text
+pi-factory init <app-id> [dir]
+pi-factory validate <app-id|app-dir|app-file>
+pi-factory plan <app-id>|--app-dir <dir>|--app-file <file>
+pi-factory run <app-id>|--app-dir <dir>|--app-file <file>
+pi-factory inspect <app-id>|--app-dir <dir>|--app-file <file>
+pi-factory link <app-dir>
+pi-factory install <owner>/<repo>[/subdir...] [--ref REF] [--yes]
+pi-factory uninstall <app-id>
+pi-factory list
+```
+
+## JavaScript API
+
+```ts
+import {
+  createPiLaunchPlan,
+  loadPiApp,
+  manifestToDefinition,
+  runPiApp,
+  writePiRuntimeConfig
+} from "pi-factory";
+```
+
+Use the API when another launcher wants Pi Factory's app resolution and config
+generation but owns its own model discovery or local runtime setup.
+
+## More
+
+- [Specification](docs/spec.md)
+- [Manifest reference](docs/manifest-v1.md)
