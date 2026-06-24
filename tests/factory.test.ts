@@ -84,6 +84,27 @@ describe("pi-factory", () => {
     ).toThrow("tools must be an array of strings");
   });
 
+  it("reports missing provider and model tables as validation errors", () => {
+    expect(() =>
+      parsePiAppManifest(`id = "demo"
+name = "Demo"
+version = "0.1.0"
+schema_version = 1
+state_dir = "/tmp/pi-factory-state"
+`)
+    ).toThrow("provider table is required");
+  });
+
+  it("rejects invalid provider and thinking enum values", () => {
+    expect(() =>
+      parsePiAppManifest(
+        sampleManifest("/tmp/pi-factory-state")
+          .replace('api = "openai-completions"', 'api = "typo"')
+          .replace('reasoning = false', 'reasoning = false\nthinking_format = "bogus"')
+      )
+    ).toThrow("provider.api must be openai-completions");
+  });
+
   it("preserves build platform filters", () => {
     const manifest = parsePiAppManifest(`${sampleManifest("/tmp/pi-factory-state")}
 [[build]]
@@ -132,7 +153,10 @@ platforms = ["linux"]
   it("runs a fake Pi command without touching real providers", async () => {
     const root = await createAppBundle();
     const fakePi = path.join(root, "fake-pi.sh");
-    await writeFile(fakePi, "#!/bin/sh\nprintf '%s\\n' \"$PI_CODING_AGENT_DIR\" > pi-dir.txt\n");
+    await writeFile(
+      fakePi,
+      "#!/bin/sh\n[ -d \"$PI_CODING_AGENT_SESSION_DIR\" ] || exit 42\nprintf '%s\\n' \"$PI_CODING_AGENT_DIR\" > pi-dir.txt\n"
+    );
     await chmod(fakePi, 0o755);
     await writeFile(
       path.join(root, "pi-app.toml"),

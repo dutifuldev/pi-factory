@@ -1,11 +1,11 @@
 import { stat } from "node:fs/promises";
 
-import { createPiLaunchPlan, execPiLaunchPlan } from "../launch.js";
+import { createPiLaunchPlan, runPiApp } from "../launch.js";
 import { initPiApp } from "../init.js";
 import { installPiApp } from "../install.js";
 import { linkPiApp, listPiApps, uninstallPiApp } from "../registry.js";
 import { loadPiApp, manifestToDefinition } from "../manifest.js";
-import { runtimeConfigPathsForApp, writePiRuntimeConfig } from "../runtime-config.js";
+import { runtimeConfigPathsForApp } from "../runtime-config.js";
 
 export type CliResult = {
   readonly code: number;
@@ -68,8 +68,7 @@ async function plan(args: readonly string[]): Promise<unknown> {
 async function runApp(args: readonly string[]): Promise<number> {
   const loaded = await loadPiApp(parseAppArgs(args));
   const app = await manifestToDefinition(loaded.manifest, loaded.appRoot);
-  const runtimeConfig = await writePiRuntimeConfig(app);
-  return await execPiLaunchPlan(await createPiLaunchPlan(app, runtimeConfig));
+  return await runPiApp(app);
 }
 
 async function validate(args: readonly string[]): Promise<string> {

@@ -3,7 +3,13 @@ import path from "node:path";
 
 import { parse } from "smol-toml";
 
-import type { PiAppDefinition, PiAppManifest, PiThinkingLevel } from "./types.js";
+import type {
+  PiAppDefinition,
+  PiAppManifest,
+  PiProviderApi,
+  PiThinkingFormat,
+  PiThinkingLevel
+} from "./types.js";
 import { expandPath, optionalExpandPath } from "./paths.js";
 import { findInstalledApp } from "./registry.js";
 
@@ -67,15 +73,19 @@ export function validatePiAppManifest(value: unknown, source = "pi-app.toml"): P
   const piCommand = optionalString(value, "pi_command");
   const tools = stringArrayField(value, "tools", false, errors);
   const systemPrompt = optionalString(value, "system_prompt");
-  const providerApi = optionalString(provider as Record<string, unknown>, "api");
-  const modelName = optionalString(model as Record<string, unknown>, "name");
-  const modelContextWindow = optionalNumber(model as Record<string, unknown>, "context_window");
-  const modelMaxTokens = optionalNumber(model as Record<string, unknown>, "max_tokens");
-  const modelReasoning = optionalBoolean(model as Record<string, unknown>, "reasoning");
-  const modelThinkingFormat = optionalString(
-    model as Record<string, unknown>,
-    "thinking_format"
-  ) as "deepseek" | "qwen-chat-template" | undefined;
+  const providerApi = provider === undefined ? undefined : optionalString(provider, "api");
+  if (providerApi !== undefined && !isProviderApi(providerApi)) {
+    errors.push("provider.api must be openai-completions");
+  }
+  const modelName = model === undefined ? undefined : optionalString(model, "name");
+  const modelContextWindow = model === undefined ? undefined : optionalNumber(model, "context_window");
+  const modelMaxTokens = model === undefined ? undefined : optionalNumber(model, "max_tokens");
+  const modelReasoning = model === undefined ? undefined : optionalBoolean(model, "reasoning");
+  const modelThinkingFormat =
+    model === undefined ? undefined : optionalString(model, "thinking_format");
+  if (modelThinkingFormat !== undefined && !isThinkingFormat(modelThinkingFormat)) {
+    errors.push("model.thinking_format must be deepseek or qwen-chat-template");
+  }
   const env = recordStringField(value, "env", false, errors);
   const extensions = extensionsField(value, errors);
   const build = buildField(value, errors);
@@ -101,7 +111,7 @@ export function validatePiAppManifest(value: unknown, source = "pi-app.toml"): P
     provider: {
       id: providerId as string,
       base_url: providerBaseUrl as string,
-      ...(providerApi === undefined ? {} : { api: providerApi as "openai-completions" })
+      ...(providerApi === undefined ? {} : { api: providerApi as PiProviderApi })
     },
     model: {
       id: modelId as string,
@@ -109,7 +119,9 @@ export function validatePiAppManifest(value: unknown, source = "pi-app.toml"): P
       ...(modelContextWindow === undefined ? {} : { context_window: modelContextWindow }),
       ...(modelMaxTokens === undefined ? {} : { max_tokens: modelMaxTokens }),
       ...(modelReasoning === undefined ? {} : { reasoning: modelReasoning }),
-      ...(modelThinkingFormat === undefined ? {} : { thinking_format: modelThinkingFormat })
+      ...(modelThinkingFormat === undefined
+        ? {}
+        : { thinking_format: modelThinkingFormat as PiThinkingFormat })
     },
     ...(env === undefined ? {} : { env }),
     ...(extensions === undefined ? {} : { extensions }),
@@ -374,4 +386,12 @@ function buildField(
 
 function isThinkingLevel(value: string): value is PiThinkingLevel {
   return ["off", "minimal", "low", "medium", "high", "xhigh"].includes(value);
+}
+
+function isProviderApi(value: string): value is PiProviderApi {
+  return value === "openai-completions";
+}
+
+function isThinkingFormat(value: string): value is PiThinkingFormat {
+  return ["deepseek", "qwen-chat-template"].includes(value);
 }
