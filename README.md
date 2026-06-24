@@ -14,10 +14,10 @@ config.
 
 ## Install
 
-From this repository:
+From npm:
 
 ```bash
-npm install -g github:dutifuldev/pi-factory
+npm install -g @dutifuldev/pi-factory
 ```
 
 During development:
@@ -154,3 +154,7 @@ generation but owns its own model discovery or local runtime setup.
 
 - [Specification](docs/spec.md)
 - [Manifest reference](docs/manifest-v1.md)
+
+## License
+
+[MIT](LICENSE)

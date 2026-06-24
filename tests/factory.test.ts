@@ -650,7 +650,7 @@ reasoning = false
 
 [[build]]
 command = ["sh", "-c", "printf built > build.txt"]
-platforms = ["linux"]
+platforms = ["linux", "macos"]
 MANIFEST
   printf '%s\n' "$commit" > "$target/.fake-commit"
   exit 0

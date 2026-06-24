@@ -1,5 +1,5 @@
 {
-  "name": "pi-factory",
+  "name": "@dutifuldev/pi-factory",
   "version": "0.1.0",
   "description": "Declarative Pi application bundle launcher.",
   "type": "module",
