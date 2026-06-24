@@ -1,0 +1,44 @@
+{
+  "name": "pi-factory",
+  "version": "0.1.0",
+  "description": "Declarative Pi application bundle launcher.",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dutifuldev/pi-factory.git"
+  },
+  "bugs": {
+    "url": "https://github.com/dutifuldev/pi-factory/issues"
+  },
+  "homepage": "https://github.com/dutifuldev/pi-factory#readme",
+  "publishConfig": {
+    "access": "public"
+  },
+  "bin": {
+    "pi-factory": "dist/src/cli/main.js"
+  },
+  "exports": {
+    ".": "./dist/src/index.js"
+  },
+  "files": [
+    "dist/src/**",
+    "docs/**",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "check": "npm run typecheck && npm test && npm run build"
+  },
+  "dependencies": {
+    "smol-toml": "^1.4.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.0.0",
+    "vitest": "^3.0.0"
+  }
+}
