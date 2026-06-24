@@ -96,6 +96,24 @@ describe("pi-factory", () => {
     );
   });
 
+  it("preserves shell-style launch command semantics", async () => {
+    const plan = await createPiLaunchPlan({
+      id: "minimal-agent",
+      name: "Minimal Agent",
+      stateDir: "/tmp/pi-factory-state",
+      sessionDir: "/tmp/pi-factory-sessions",
+      piCommand: "LOCALPI_TEST=ok sh -c 'test \"$LOCALPI_TEST\" = ok' --",
+      providers: [
+        { id: "local-openai", baseUrl: "http://127.0.0.1:1234/v1", models: [{ id: "auto" }] }
+      ],
+      defaultProvider: "local-openai",
+      defaultModel: "auto",
+      thinking: "medium"
+    });
+
+    await expect(execPiLaunchPlan(plan)).resolves.toBe(0);
+  });
+
   it("writes Pi models and settings config", async () => {
     const root = await createAppBundle();
     try {

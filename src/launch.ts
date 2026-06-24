@@ -52,11 +52,9 @@ export async function runPiApp(app: PiAppDefinition): Promise<number> {
 
 export async function execPiLaunchPlan(plan: PiLaunchPlan): Promise<number> {
   const stdio: StdioOptions = "inherit";
-  const [program, ...commandArgs] = splitCommandLine(plan.command);
-  if (program === undefined) {
-    throw new Error("launch command must not be empty");
-  }
-  const child = spawn(program, [...commandArgs, ...plan.args], {
+  assertLaunchCommand(plan.command);
+  const child = spawn(shellCommand(plan.command, plan.args), {
+    shell: true,
     stdio,
     cwd: plan.cwd,
     env: { ...process.env, ...plan.env }
@@ -142,6 +140,13 @@ function managedPiEnvWarnings(
 
 function shellQuote(value: string): string {
   return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
+function assertLaunchCommand(command: string): void {
+  const [program] = splitCommandLine(command);
+  if (program === undefined) {
+    throw new Error("launch command must not be empty");
+  }
 }
 
 function splitCommandLine(command: string): string[] {
