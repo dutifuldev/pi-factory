@@ -2,7 +2,7 @@ import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/pr
 import os from "node:os";
 import path from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { run } from "../src/cli/cli.js";
 import { initPiApp } from "../src/init.js";
@@ -377,8 +377,8 @@ platforms = ["linux"]
     const stateDir = await mkdtemp(path.join(os.tmpdir(), "pi-factory-state-"));
     const root = await mkdtemp(path.join(os.tmpdir(), "pi-factory-project-"));
     const previousState = process.env["PI_FACTORY_STATE_DIR"];
-    const previousCwd = process.cwd();
     process.env["PI_FACTORY_STATE_DIR"] = stateDir;
+    const cwdSpy = vi.spyOn(process, "cwd").mockReturnValue(root);
     try {
       await writeFile(path.join(stateDir, "apps.json"), "{bad json");
       await mkdir(path.join(root, ".pi", "apps", "demo-agent"), { recursive: true });
@@ -386,11 +386,10 @@ platforms = ["linux"]
         path.join(root, ".pi", "apps", "demo-agent", "pi-app.toml"),
         minimalManifest("demo-agent", path.join(root, "state"))
       );
-      process.chdir(root);
       const loaded = await loadPiApp({ app: "demo-agent" });
       expect(loaded.manifest.id).toBe("demo-agent");
     } finally {
-      process.chdir(previousCwd);
+      cwdSpy.mockRestore();
       restoreEnv("PI_FACTORY_STATE_DIR", previousState);
       await rm(root, { recursive: true, force: true });
       await rm(stateDir, { recursive: true, force: true });
