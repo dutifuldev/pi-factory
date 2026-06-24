@@ -82,6 +82,9 @@ function systemPromptArgs(app: PiAppDefinition): readonly string[] {
   if (app.systemPrompt !== undefined) {
     args.push("--system-prompt", app.systemPrompt);
   }
+  for (const prompt of app.appendSystemPrompts ?? []) {
+    args.push("--append-system-prompt", prompt);
+  }
   for (const extension of app.extensions ?? []) {
     if (extension.appendSystemPrompt !== undefined) {
       args.push("--append-system-prompt", extension.appendSystemPrompt);

@@ -61,6 +61,7 @@ export type PiAppDefinition = {
   readonly thinking: PiThinkingLevel;
   readonly tools?: string;
   readonly systemPrompt?: string;
+  readonly appendSystemPrompts?: readonly string[];
   readonly extensions?: readonly PiExtensionDefinition[];
   readonly env?: Readonly<Record<string, string>>;
   readonly forwardedArgs?: readonly string[];

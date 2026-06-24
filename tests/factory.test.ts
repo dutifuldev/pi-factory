@@ -29,6 +29,7 @@ describe("pi-factory", () => {
       expect(plan.args).toContain("local-openai");
       expect(plan.args).toContain("--extension");
       expect(plan.args).toContain(path.join(root, "extensions", "demo.ts"));
+      expect(plan.args).toContain("--append-system-prompt");
       expect(plan.env["PI_CODING_AGENT_DIR"]).toContain("pi-config-runtime");
       expect(shellCommand("pi", ["quoted 'arg'"])).toBe("pi 'quoted '\\''arg'\\'''");
     } finally {
