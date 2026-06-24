@@ -117,7 +117,10 @@ async function runCommand(command: readonly string[], cwd: string, label: string
     throw new Error(`${label}: empty command`);
   }
   const child = spawn(program, args, { cwd, stdio: "inherit" });
-  const code = await waitForChild(child);
+  const { code, signal } = await waitForChild(child);
+  if (signal !== null) {
+    throw new Error(`${label} terminated by signal ${signal}`);
+  }
   if (code !== 0) {
     throw new Error(`${label} failed with exit code ${code}`);
   }
@@ -137,18 +140,23 @@ async function outputCommand(command: readonly string[]): Promise<string> {
   child.stderr.on("data", (chunk: Buffer) => {
     stderr += chunk.toString();
   });
-  const code = await waitForChild(child);
+  const { code, signal } = await waitForChild(child);
+  if (signal !== null) {
+    throw new Error(`${program} terminated by signal ${signal}: ${stderr.trim()}`);
+  }
   if (code !== 0) {
     throw new Error(`${program} failed with exit code ${code}: ${stderr.trim()}`);
   }
   return stdout.trim();
 }
 
-async function waitForChild(child: ReturnType<typeof spawn>): Promise<number> {
-  return await new Promise<number>((resolve, reject) => {
+async function waitForChild(
+  child: ReturnType<typeof spawn>
+): Promise<{ readonly code: number | null; readonly signal: NodeJS.Signals | null }> {
+  return await new Promise((resolve, reject) => {
     child.on("error", reject);
-    child.on("exit", (code) => {
-      resolve(code ?? 0);
+    child.on("exit", (code, signal) => {
+      resolve({ code, signal });
     });
   });
 }

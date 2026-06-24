@@ -5,6 +5,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { run } from "../src/cli/cli.js";
+import { initPiApp } from "../src/init.js";
 import { createPiLaunchPlan, shellCommand } from "../src/launch.js";
 import { loadPiApp, manifestToDefinition, parsePiAppManifest } from "../src/manifest.js";
 import { linkPiApp } from "../src/registry.js";
@@ -105,6 +106,14 @@ state_dir = "/tmp/pi-factory-state"
     ).toThrow("provider.api must be openai-completions");
   });
 
+  it("rejects malformed optional model fields", () => {
+    expect(() =>
+      parsePiAppManifest(
+        sampleManifest("/tmp/pi-factory-state").replace("context_window = 4096", 'context_window = "4096"')
+      )
+    ).toThrow("context_window must be a number");
+  });
+
   it("preserves build platform filters", () => {
     const manifest = parsePiAppManifest(`${sampleManifest("/tmp/pi-factory-state")}
 [[build]]
@@ -112,6 +121,27 @@ command = ["echo", "build"]
 platforms = ["linux"]
 `);
     expect(manifest.build?.[0]).toEqual({ command: ["echo", "build"], platforms: ["linux"] });
+  });
+
+  it("rejects unknown build platform filters", () => {
+    expect(() =>
+      parsePiAppManifest(`${sampleManifest("/tmp/pi-factory-state")}
+[[build]]
+command = ["echo", "build"]
+platforms = ["darwin"]
+`)
+    ).toThrow("build[0].platforms must contain only linux, macos, or windows");
+  });
+
+  it("does not overwrite existing app bundles on init", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "pi-factory-init-"));
+    await writeFile(path.join(root, "pi-app.toml"), "existing\n");
+    try {
+      await expect(initPiApp("demo-agent", root)).rejects.toThrow("pi-app.toml");
+      await expect(readFile(path.join(root, "pi-app.toml"), "utf8")).resolves.toBe("existing\n");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it("links local app bundles and lists them", async () => {

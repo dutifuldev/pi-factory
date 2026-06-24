@@ -1,13 +1,17 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { access, mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 export async function initPiApp(appId: string, targetDir = appId): Promise<string> {
   const root = path.resolve(targetDir);
+  const systemPromptPath = path.join(root, "prompts", "system.md");
+  const manifestPath = path.join(root, "pi-app.toml");
+  await assertAbsent(systemPromptPath);
+  await assertAbsent(manifestPath);
   await mkdir(path.join(root, "prompts"), { recursive: true });
   await mkdir(path.join(root, "extensions"), { recursive: true });
-  await writeFile(path.join(root, "prompts", "system.md"), `You are ${appId}, a Pi app.\n`);
+  await writeFile(systemPromptPath, `You are ${appId}, a Pi app.\n`, { flag: "wx" });
   await writeFile(
-    path.join(root, "pi-app.toml"),
+    manifestPath,
     `id = "${appId}"\n` +
       `name = "${appId}"\n` +
       `version = "0.1.0"\n` +
@@ -23,7 +27,17 @@ export async function initPiApp(appId: string, targetDir = appId): Promise<strin
       `api = "openai-completions"\n\n` +
       `[model]\n` +
       `id = "auto"\n` +
-      `reasoning = false\n`
+      `reasoning = false\n`,
+    { flag: "wx" }
   );
   return root;
+}
+
+async function assertAbsent(file: string): Promise<void> {
+  try {
+    await access(file);
+  } catch {
+    return;
+  }
+  throw new Error(`${file} already exists`);
 }

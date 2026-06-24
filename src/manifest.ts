@@ -78,9 +78,10 @@ export function validatePiAppManifest(value: unknown, source = "pi-app.toml"): P
     errors.push("provider.api must be openai-completions");
   }
   const modelName = model === undefined ? undefined : optionalString(model, "name");
-  const modelContextWindow = model === undefined ? undefined : optionalNumber(model, "context_window");
-  const modelMaxTokens = model === undefined ? undefined : optionalNumber(model, "max_tokens");
-  const modelReasoning = model === undefined ? undefined : optionalBoolean(model, "reasoning");
+  const modelContextWindow =
+    model === undefined ? undefined : optionalNumber(model, "context_window", errors);
+  const modelMaxTokens = model === undefined ? undefined : optionalNumber(model, "max_tokens", errors);
+  const modelReasoning = model === undefined ? undefined : optionalBoolean(model, "reasoning", errors);
   const modelThinkingFormat =
     model === undefined ? undefined : optionalString(model, "thinking_format");
   if (modelThinkingFormat !== undefined && !isThinkingFormat(modelThinkingFormat)) {
@@ -278,14 +279,36 @@ function optionalString(value: Record<string, unknown>, key: string): string | u
   return typeof entry === "string" ? entry : undefined;
 }
 
-function optionalNumber(value: Record<string, unknown>, key: string): number | undefined {
+function optionalNumber(
+  value: Record<string, unknown>,
+  key: string,
+  errors: string[]
+): number | undefined {
   const entry = value[key];
-  return typeof entry === "number" ? entry : undefined;
+  if (entry === undefined) {
+    return undefined;
+  }
+  if (typeof entry === "number") {
+    return entry;
+  }
+  errors.push(`${key} must be a number`);
+  return undefined;
 }
 
-function optionalBoolean(value: Record<string, unknown>, key: string): boolean | undefined {
+function optionalBoolean(
+  value: Record<string, unknown>,
+  key: string,
+  errors: string[]
+): boolean | undefined {
   const entry = value[key];
-  return typeof entry === "boolean" ? entry : undefined;
+  if (entry === undefined) {
+    return undefined;
+  }
+  if (typeof entry === "boolean") {
+    return entry;
+  }
+  errors.push(`${key} must be a boolean`);
+  return undefined;
 }
 
 function stringArrayField(
@@ -372,9 +395,11 @@ function buildField(
       errors.push(`build[${index}].command must be an array of strings`);
       return [];
     }
-    const platforms = stringArrayField(item, "platforms", false, errors) as
-      | readonly ("linux" | "macos" | "windows")[]
-      | undefined;
+    const platforms = stringArrayField(item, "platforms", false, errors);
+    if (platforms !== undefined && !platforms.every(isPlatform)) {
+      errors.push(`build[${index}].platforms must contain only linux, macos, or windows`);
+      return [];
+    }
     return [
       {
         command: command as readonly string[],
@@ -394,4 +419,8 @@ function isProviderApi(value: string): value is PiProviderApi {
 
 function isThinkingFormat(value: string): value is PiThinkingFormat {
   return ["deepseek", "qwen-chat-template"].includes(value);
+}
+
+function isPlatform(value: string): value is "linux" | "macos" | "windows" {
+  return ["linux", "macos", "windows"].includes(value);
 }
