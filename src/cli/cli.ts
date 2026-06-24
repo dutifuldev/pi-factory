@@ -1,3 +1,5 @@
+import { stat } from "node:fs/promises";
+
 import { createPiLaunchPlan, execPiLaunchPlan } from "../launch.js";
 import { initPiApp } from "../init.js";
 import { installPiApp } from "../install.js";
@@ -72,7 +74,7 @@ async function runApp(args: readonly string[]): Promise<number> {
 
 async function validate(args: readonly string[]): Promise<string> {
   const target = required(args[0], "usage: pi-factory validate <app-id|app-dir|app-file>");
-  const loaded = await loadPiApp(target.endsWith(".toml") ? { appFile: target } : { app: target, appDir: target });
+  const loaded = await loadPiApp(await validateTarget(target));
   return `valid ${loaded.manifest.id} (${loaded.manifestPath})\n`;
 }
 
@@ -144,6 +146,20 @@ function parseAppArgs(args: readonly string[]): { app?: string; appFile?: string
     return { ...(app === undefined ? {} : { app }), ...(appFile === undefined ? {} : { appFile }), ...(appDir === undefined ? {} : { appDir }) };
   }
   return { app: required(app, "usage: pi-factory <plan|run|inspect> <app-id>") };
+}
+
+async function validateTarget(
+  target: string
+): Promise<{ app?: string; appFile?: string; appDir?: string }> {
+  try {
+    const info = await stat(target);
+    if (info.isDirectory()) {
+      return { appDir: target };
+    }
+    return { appFile: target };
+  } catch {
+    return { app: target };
+  }
 }
 
 function ok(stdout: string): CliResult {

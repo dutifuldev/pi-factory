@@ -63,6 +63,36 @@ describe("pi-factory", () => {
     }
   });
 
+  it("resolves relative state paths from the app bundle root", async () => {
+    const root = await createAppBundle("relative-state");
+    try {
+      const loaded = await loadPiApp({ appDir: root });
+      const app = await manifestToDefinition(loaded.manifest, loaded.appRoot);
+      expect(app.stateDir).toBe(path.join(root, "relative-state"));
+      expect(app.sessionDir).toBe(path.join(root, "relative-state", "sessions"));
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects malformed optional manifest fields", () => {
+    expect(() =>
+      parsePiAppManifest(sampleManifest("/tmp/pi-factory-state").replace(
+        'tools = ["read", "bash"]',
+        'tools = "bash"'
+      ))
+    ).toThrow("tools must be an array of strings");
+  });
+
+  it("preserves build platform filters", () => {
+    const manifest = parsePiAppManifest(`${sampleManifest("/tmp/pi-factory-state")}
+[[build]]
+command = ["echo", "build"]
+platforms = ["linux"]
+`);
+    expect(manifest.build?.[0]).toEqual({ command: ["echo", "build"], platforms: ["linux"] });
+  });
+
   it("links local app bundles and lists them", async () => {
     const stateDir = await mkdtemp(path.join(os.tmpdir(), "pi-factory-state-"));
     const root = await createAppBundle();
@@ -80,6 +110,24 @@ describe("pi-factory", () => {
       await rm(stateDir, { recursive: true, force: true });
     }
   });
+
+  it("validates linked app ids through the installed app index", async () => {
+    const stateDir = await mkdtemp(path.join(os.tmpdir(), "pi-factory-state-"));
+    const root = await createAppBundle();
+    const previous = process.env["PI_FACTORY_STATE_DIR"];
+    process.env["PI_FACTORY_STATE_DIR"] = stateDir;
+    try {
+      await linkPiApp(root);
+      const result = await run(["validate", "demo-agent"]);
+      expect(result.code).toBe(0);
+      expect(result.stdout).toContain("valid demo-agent");
+    } finally {
+      restoreEnv("PI_FACTORY_STATE_DIR", previous);
+      await rm(root, { recursive: true, force: true });
+      await rm(stateDir, { recursive: true, force: true });
+    }
+  });
+
 
   it("runs a fake Pi command without touching real providers", async () => {
     const root = await createAppBundle();
@@ -101,14 +149,14 @@ describe("pi-factory", () => {
   });
 });
 
-async function createAppBundle(): Promise<string> {
+async function createAppBundle(stateDir?: string): Promise<string> {
   const root = await mkdtemp(path.join(os.tmpdir(), "pi-factory-app-"));
   await mkdir(path.join(root, "prompts"), { recursive: true });
   await mkdir(path.join(root, "extensions"), { recursive: true });
   await writeFile(path.join(root, "prompts", "system.md"), "System prompt\n");
   await writeFile(path.join(root, "prompts", "extension.md"), "Extension prompt\n");
   await writeFile(path.join(root, "extensions", "demo.ts"), "export default {};\n");
-  await writeFile(path.join(root, "pi-app.toml"), sampleManifest(path.join(root, "state")));
+  await writeFile(path.join(root, "pi-app.toml"), sampleManifest(stateDir ?? path.join(root, "state")));
   return root;
 }
 

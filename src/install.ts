@@ -1,7 +1,7 @@
-import { mkdtemp, rename, rm } from "node:fs/promises";
-import os from "node:os";
+import { mkdir, mkdtemp, rename, rm } from "node:fs/promises";
 import path from "node:path";
 import { spawn } from "node:child_process";
+import readline from "node:readline/promises";
 
 import type { InstalledPiApp, PiAppSourceInfo, PiBuildCommand } from "./types.js";
 import { currentPlatform, managedAppsDir, safePathComponent } from "./paths.js";
@@ -22,7 +22,8 @@ type GithubSource = {
 
 export async function installPiApp(input: InstallInput): Promise<InstalledPiApp> {
   const source = parseGithubSource(input.source);
-  const tempRoot = await mkdtemp(path.join(os.tmpdir(), "pi-factory-install-"));
+  await mkdir(managedAppsDir(), { recursive: true });
+  const tempRoot = await mkdtemp(path.join(managedAppsDir(), ".install-"));
   const checkout = path.join(tempRoot, "checkout");
   try {
     await git(["clone", "--depth", "1", ...refArgs(input.requestedRef), githubUrl(source), checkout]);
@@ -37,6 +38,9 @@ export async function installPiApp(input: InstallInput): Promise<InstalledPiApp>
       process.stderr.write(`  id: ${loaded.manifest.id}\n`);
       process.stderr.write(`  name: ${loaded.manifest.name}\n`);
       process.stderr.write(`  source: ${input.source}\n`);
+      if (!(await confirm("Install this Pi app?"))) {
+        throw new Error("Pi app install cancelled");
+      }
     }
     await runBuildCommands(loaded.manifest.build ?? [], appRoot);
     const finalRoot = path.join(
@@ -44,7 +48,7 @@ export async function installPiApp(input: InstallInput): Promise<InstalledPiApp>
       `${safePathComponent(loaded.manifest.id)}-${safePathComponent(resolvedCommit.slice(0, 12))}`
     );
     await rm(finalRoot, { recursive: true, force: true });
-    await mkdirParent(finalRoot);
+    await mkdir(path.dirname(finalRoot), { recursive: true });
     await rename(checkout, finalRoot);
     const finalAppRoot = source.subdir === undefined ? finalRoot : path.join(finalRoot, source.subdir);
     const sourceInfo: PiAppSourceInfo = {
@@ -99,11 +103,6 @@ function refArgs(requestedRef: string | undefined): readonly string[] {
   return requestedRef === undefined ? [] : ["--branch", requestedRef];
 }
 
-async function mkdirParent(file: string): Promise<void> {
-  const { mkdir } = await import("node:fs/promises");
-  await mkdir(path.dirname(file), { recursive: true });
-}
-
 async function git(args: readonly string[]): Promise<void> {
   await runCommand(["git", ...args], process.cwd(), "git");
 }
@@ -152,4 +151,14 @@ async function waitForChild(child: ReturnType<typeof spawn>): Promise<number> {
       resolve(code ?? 0);
     });
   });
+}
+
+async function confirm(question: string): Promise<boolean> {
+  const rl = readline.createInterface({ input: process.stdin, output: process.stderr });
+  try {
+    const answer = await rl.question(`${question} [y/N] `);
+    return answer.trim().toLowerCase() === "y" || answer.trim().toLowerCase() === "yes";
+  } finally {
+    rl.close();
+  }
 }

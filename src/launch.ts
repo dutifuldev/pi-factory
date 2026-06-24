@@ -50,8 +50,11 @@ export async function runPiApp(app: PiAppDefinition): Promise<number> {
 
 export async function execPiLaunchPlan(plan: PiLaunchPlan): Promise<number> {
   const stdio: StdioOptions = "inherit";
-  const child = spawn(shellCommand(plan.command, plan.args), {
-    shell: true,
+  const [program, ...commandArgs] = splitCommandLine(plan.command);
+  if (program === undefined) {
+    throw new Error("launch command must not be empty");
+  }
+  const child = spawn(program, [...commandArgs, ...plan.args], {
     stdio,
     cwd: plan.cwd,
     env: { ...process.env, ...plan.env }
@@ -108,4 +111,52 @@ function hasToolFlag(args: readonly string[]): boolean {
 
 function shellQuote(value: string): string {
   return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
+function splitCommandLine(command: string): string[] {
+  const parts: string[] = [];
+  let current = "";
+  let quote: "'" | "\"" | undefined;
+  let escaping = false;
+  for (const char of command) {
+    if (escaping) {
+      current += char;
+      escaping = false;
+      continue;
+    }
+    if (char === "\\") {
+      escaping = true;
+      continue;
+    }
+    if (quote !== undefined) {
+      if (char === quote) {
+        quote = undefined;
+      } else {
+        current += char;
+      }
+      continue;
+    }
+    if (char === "'" || char === "\"") {
+      quote = char;
+      continue;
+    }
+    if (/\s/u.test(char)) {
+      if (current !== "") {
+        parts.push(current);
+        current = "";
+      }
+      continue;
+    }
+    current += char;
+  }
+  if (escaping) {
+    current += "\\";
+  }
+  if (quote !== undefined) {
+    throw new Error(`unterminated quote in launch command: ${command}`);
+  }
+  if (current !== "") {
+    parts.push(current);
+  }
+  return parts;
 }

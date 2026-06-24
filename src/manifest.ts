@@ -62,10 +62,6 @@ export function validatePiAppManifest(value: unknown, source = "pi-app.toml"): P
     errors.push("thinking must be one of off, minimal, low, medium, high, xhigh");
   }
 
-  if (errors.length > 0) {
-    throw new Error(`${source}: invalid manifest\n${errors.map((error) => `- ${error}`).join("\n")}`);
-  }
-
   const description = optionalString(value, "description");
   const sessionDir = optionalString(value, "session_dir");
   const piCommand = optionalString(value, "pi_command");
@@ -83,6 +79,12 @@ export function validatePiAppManifest(value: unknown, source = "pi-app.toml"): P
   const env = recordStringField(value, "env", false, errors);
   const extensions = extensionsField(value, errors);
   const build = buildField(value, errors);
+
+  if (errors.length > 0) {
+    throw new Error(
+      `${source}: invalid manifest\n${errors.map((error) => `- ${error}`).join("\n")}`
+    );
+  }
 
   return {
     id: id as string,
@@ -137,8 +139,8 @@ export async function manifestToDefinition(
     version: manifest.version,
     ...(manifest.description === undefined ? {} : { description: manifest.description }),
     rootDir: appRoot,
-    stateDir: expandPath(manifest.state_dir),
-    sessionDir: expandPath(manifest.session_dir ?? `${manifest.state_dir}/sessions`),
+    stateDir: expandPath(manifest.state_dir, appRoot),
+    sessionDir: expandPath(manifest.session_dir ?? `${manifest.state_dir}/sessions`, appRoot),
     piCommand: manifest.pi_command ?? "npx -y @earendil-works/pi-coding-agent@latest",
     providers: [
       {
@@ -358,7 +360,15 @@ function buildField(
       errors.push(`build[${index}].command must be an array of strings`);
       return [];
     }
-    return [{ command: command as readonly string[] }];
+    const platforms = stringArrayField(item, "platforms", false, errors) as
+      | readonly ("linux" | "macos" | "windows")[]
+      | undefined;
+    return [
+      {
+        command: command as readonly string[],
+        ...(platforms === undefined ? {} : { platforms })
+      }
+    ];
   });
 }
 
